@@ -7,13 +7,16 @@ const ERRORS: Record<string, string> = {
   CodigoInvalido: "El código no es correcto. Revísalo e intenta de nuevo.",
   CodigoVencido: "El código venció o ya se usó. Pide uno nuevo.",
   DemasiadosIntentos: "Demasiados intentos con ese código. Pide uno nuevo.",
+  DominioNoPermitido: "Este generador es solo para el equipo de GeoVictoria. Usa tu correo @geovictoria.com.",
+  ClaveIncorrecta: "La clave del equipo no es correcta. Pídela a quien administra la herramienta.",
 };
 
-export function LoginButtons({ providers, domains }: { providers: { id: string; name: string }[]; domains: string }) {
+export function LoginButtons({ providers, domains, mode, keyRequired }: { providers: { id: string; name: string }[]; domains: string; mode: "email" | "code"; keyRequired: boolean }) {
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -22,6 +25,15 @@ export function LoginButtons({ providers, domains }: { providers: { id: string; 
   const dev = providers.some((p) => p.id === "dev");
 
   useEffect(() => { if (step === "code") codeRef.current?.focus(); }, [step]);
+
+  async function enterWithEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    const res = await signIn("email-only", { email: email.trim().toLowerCase(), name, key, redirect: false });
+    if (res?.ok && !res.error) { window.location.href = "/"; return; }
+    setBusy(false);
+    setMsg({ ok: false, text: ERRORS[res?.error ?? ""] ?? "No pudimos iniciar tu sesión. Intenta de nuevo." });
+  }
 
   async function requestCode(e?: React.FormEvent) {
     e?.preventDefault();
@@ -50,7 +62,21 @@ export function LoginButtons({ providers, domains }: { providers: { id: string; 
 
   return (
     <div className="stack" style={{ textAlign: "left" }}>
-      {step === "email" ? (
+      {mode === "email" ? (
+        <form className="stack" onSubmit={enterWithEmail}>
+          <label className="fl" htmlFor="login-email">Correo corporativo</label>
+          <input className="input" id="login-email" type="email" autoComplete="email" required placeholder="nombre@geovictoria.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <label className="fl" htmlFor="login-name">Tu nombre <span className="muted">(como aparecerá en las actas)</span></label>
+          <input className="input" id="login-name" type="text" autoComplete="name" placeholder="Nombre y apellido" value={name} onChange={(e) => setName(e.target.value)} />
+          {keyRequired && (
+            <>
+              <label className="fl" htmlFor="login-key">Clave del equipo</label>
+              <input className="input" id="login-key" type="password" autoComplete="current-password" required value={key} onChange={(e) => setKey(e.target.value)} />
+            </>
+          )}
+          <button className="btn btn-primary btn-lg" type="submit" disabled={busy}>{busy ? "Entrando…" : "Entrar"}</button>
+        </form>
+      ) : step === "email" ? (
         <form className="stack" onSubmit={requestCode}>
           <label className="fl" htmlFor="login-email">Correo corporativo</label>
           <input className="input" id="login-email" type="email" autoComplete="email" required placeholder="nombre@geovictoria.com" value={email} onChange={(e) => setEmail(e.target.value)} />

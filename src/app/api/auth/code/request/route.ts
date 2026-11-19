@@ -10,6 +10,7 @@ const Body = z.object({ email: z.string().trim().toLowerCase().email(), name: z.
 
 /** Paso 1 del inicio de sesión: envía un código de 6 dígitos al correo corporativo. */
 export async function POST(req: Request) {
+  if ((process.env.LOGIN_MODE ?? "email").toLowerCase() !== "code") return Response.json({ error: "El ingreso con código no está activado." }, { status: 404 });
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Escribe un correo válido." }, { status: 400 });
   const { email, name } = parsed.data;

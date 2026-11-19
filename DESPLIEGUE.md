@@ -1,6 +1,6 @@
 # Guía de despliegue para TI — Generador de actas GeoVictoria
 
-**Qué es:** una aplicación web (Next.js 14) donde cualquier persona con correo **@geovictoria.com** entra con un código de 6 dígitos que le llega a ese correo (o, si TI lo configura, con su cuenta de Microsoft). Ve sus reuniones grabadas en Samu.ai, genera el acta con IA, la descarga en Word o PDF y crea las tareas en Zoho CRM. **No se necesita cuenta de Claude.**
+**Qué es:** una aplicación web (Next.js 14) donde cualquier persona con correo **@geovictoria.com** entra escribiendo ese correo. Opcionalmente se puede exigir una clave del equipo (`ACCESS_KEY`), un código por correo (`LOGIN_MODE=code`) o la cuenta de Microsoft. Ve sus reuniones grabadas en Samu.ai, genera el acta con IA, la descarga en Word o PDF y crea las tareas en Zoho CRM. **No se necesita cuenta de Claude.**
 
 **Quién ve qué:** la app usa **una sola clave de Samu de la empresa**, pero el servidor filtra por el correo de quien inició sesión. Cada persona solo ve las reuniones donde participó. Las actas no se guardan en el servidor: se generan, se editan en el navegador y se descargan.
 
@@ -16,7 +16,14 @@
 | 4 | **Cliente de Zoho CRM** con refresh token | api-console.zoho.com → Self Client | Admin de Zoho |
 | 5 | Un lugar donde publicarla, con HTTPS | Vercel, Azure App Service o un servidor con Node 20 | TI |
 
-### 1.0 Correo que envía los códigos (lo puede hacer cualquiera, sin TI)
+### 1.0 Inicio de sesión
+
+**Por defecto** basta con escribir un correo @geovictoria.com. No hay verificación: cualquier persona que conozca un correo de la empresa puede entrar y ver las reuniones de Samu.ai de esa persona. Para cerrarlo sin TI:
+
+- **Clave del equipo:** agrega `ACCESS_KEY` en Vercel con la clave que quieras y compártela con el equipo. Haz Redeploy.
+- **Código por correo:** agrega `LOGIN_MODE=code` y configura el correo que envía los códigos (abajo).
+
+#### Correo que envía los códigos (solo con LOGIN_MODE=code)
 1. Crea una cuenta de Gmail para la herramienta (ej. `actas.geovictoria@gmail.com`).
 2. En myaccount.google.com → **Seguridad** → activa **Verificación en 2 pasos**.
 3. En myaccount.google.com/apppasswords crea una contraseña de aplicación llamada `Generador de actas`. Google muestra 16 letras.

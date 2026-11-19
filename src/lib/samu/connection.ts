@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { seal, unseal } from "./seal";
 import { refreshTokens, type AuthServer, type ClientInfo, type Tokens } from "./oauth";
-import { McpAuthError, callTool } from "./mcp";
+import { McpAuthError, callTool, openSession } from "./mcp";
 
 /** Conexión de Samu de una persona: vive cifrada en una cookie de su navegador. */
 export type SamuConnection = { email: string; as: AuthServer; client: ClientInfo; tokens: Tokens; connectedAt: number };
@@ -57,5 +57,22 @@ async function renew(conn: SamuConnection, url: string) {
   } catch {
     clearConnection();
     throw new SamuNotConnected();
+  }
+}
+
+/** Sesión con Samu para varias llamadas seguidas (renueva el acceso una vez si venció). */
+export async function samuSession(email: string) {
+  const conn = readConnection(email);
+  if (!conn) throw new SamuNotConnected();
+  const url = mcpUrl();
+  const expired = conn.tokens.expires_at && conn.tokens.expires_at < Date.now() + 30_000;
+  if (expired && conn.tokens.refresh_token) await renew(conn, url);
+  try {
+    return await openSession(url, conn.tokens.access_token);
+  } catch (e) {
+    if (!(e instanceof McpAuthError)) throw e;
+    if (!conn.tokens.refresh_token) { clearConnection(); throw new SamuNotConnected(); }
+    await renew(conn, url);
+    return openSession(url, conn.tokens.access_token);
   }
 }

@@ -1,6 +1,7 @@
 import { requireUser, errorResponse, HttpError } from "@/lib/auth";
 import { listMeetings, SamuError, samuMode } from "@/lib/integrations/samu";
 import { SamuNotConnected } from "@/lib/samu/connection";
+import { McpRateLimited } from "@/lib/samu/mcp";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export async function GET() {
     const user = await requireUser();
     const meetings = await listMeetings(user.email, user.name).catch((e) => {
       if (e instanceof SamuNotConnected) throw e;
+      if (e instanceof McpRateLimited) throw new HttpError(429, "Samu.ai pidió esperar un momento. Toca Actualizar en un minuto.");
       if (e instanceof SamuError || samuMode() === "user") {
         console.error(e.message);
         throw new HttpError(502, e instanceof SamuError && (e.status === 401 || e.status === 403)

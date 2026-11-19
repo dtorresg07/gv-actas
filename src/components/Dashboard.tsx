@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { MeetingSummary } from "@/lib/types";
 import { Calendar, Clock } from "./Icons";
 
-const POLL_MS = 90_000;
+const POLL_MS = 5 * 60_000;
 
 const fmt = (iso: string) =>
   new Intl.DateTimeFormat("es-CO", { weekday: "short", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
@@ -52,9 +52,7 @@ export function Dashboard() {
   useEffect(() => {
     load();
     const id = setInterval(() => document.visibilityState === "visible" && load(), POLL_MS);
-    const onFocus = () => load();
-    window.addEventListener("focus", onFocus);
-    return () => { clearInterval(id); window.removeEventListener("focus", onFocus); };
+    return () => clearInterval(id);
   }, [load]);
 
   async function disconnect() {

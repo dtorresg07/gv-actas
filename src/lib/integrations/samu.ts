@@ -1,7 +1,8 @@
 import { config, emailVariants, isAllowedEmail } from "../config";
 import type { MeetingSummary, Person, TranscriptLine } from "../types";
 import { mockMeetings, mockTranscript } from "./samu.mock";
-import { mcpUrl, samuTool } from "../samu/connection";
+import { mcpUrl, samuSession } from "../samu/connection";
+import { McpRateLimited } from "../samu/mcp";
 
 /**
  * Cliente de la API REST de Samu.ai (plan Enterprise).
@@ -134,7 +135,9 @@ export function normalizeMeeting(m: RawMeeting): MeetingSummary {
 /* ---------- Reuniones ---------- */
 
 const PAGE = 10;   // Samu devuelve resúmenes largos: páginas chicas
-const MAX = 60;
+const MAX = 40;
+const CACHE_MS = 60_000;
+const cache = new Map<string, { at: number; meetings: MeetingSummary[] }>();
 
 /** Reuniones recientes donde participó el usuario (como anfitrión, invitado o asistente). */
 export async function listMeetings(userEmail: string, userName?: string): Promise<MeetingSummary[]> {
@@ -144,17 +147,28 @@ export async function listMeetings(userEmail: string, userName?: string): Promis
   const to = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   const from = new Date(Date.now() - config.samu.recentDays * 86_400_000).toISOString().slice(0, 10);
 
+  const cached = cache.get(userEmail);
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.meetings;
+
+  const session = mode === "user" ? await samuSession(userEmail) : null;
   const found: MeetingSummary[] = [];
   // Samu puede devolver menos reuniones que las pedidas cuando los resúmenes son largos ("truncated"):
   // se avanza según lo que realmente llegó y se sigue hasta cubrir el total.
   let offset = 0;
   for (let call = 0; call < 20 && found.length < MAX; call++) {
     type Page = { meetings?: RawMeeting[]; data?: RawMeeting[]; total?: number };
-    const data = mode === "user"
-      ? await samuTool<Page>(userEmail, "search_meetings", { attendeeEmails: variants, dateRange: { from, to }, limit: PAGE, offset })
-      : await samuFetch<Page>(PATH_MEETINGS, {
-          [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
-        });
+    let data: Page;
+    try {
+      data = session
+        ? await session.call<Page>("search_meetings", { attendeeEmails: variants, dateRange: { from, to }, limit: PAGE, offset })
+        : await samuFetch<Page>(PATH_MEETINGS, {
+            [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
+          });
+    } catch (e) {
+      // Si Samu pide esperar a mitad de camino, se muestran las reuniones ya leídas.
+      if (e instanceof McpRateLimited && found.length) break;
+      throw e;
+    }
     const raw = data.meetings ?? data.data ?? [];
     for (const m of raw.map(normalizeMeeting).filter((x) => MEETING_ID.test(x.id))) {
       if (!found.some((f) => f.id === m.id)) found.push(m);
@@ -163,7 +177,7 @@ export async function listMeetings(userEmail: string, userName?: string): Promis
     if (raw.length === 0 || (data.total !== undefined && offset >= data.total)) break;
   }
   // Con la cuenta propia, Samu ya limita lo que la persona puede ver.
-  if (mode === "user") return found;
+  if (mode === "user") { cache.set(userEmail, { at: Date.now(), meetings: found }); return found; }
   // Con la clave de la empresa, defensa adicional: solo reuniones donde figura su correo o es anfitrión.
   return found.filter((m) => m.emails.some((e) => variants.includes(e)) || (userName && m.host === userName));
 }
@@ -207,11 +221,12 @@ export async function getTranscript(id: string, userName?: string, userEmail?: s
   const mode = samuMode();
   if (mode === "mock") return parseTranscript(mockTranscript(userName));
 
+  const session = mode === "user" ? await samuSession(userEmail ?? "") : null;
   const parts: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 100; page++) {
     const data = mode === "user"
-      ? await samuTool<RawTranscript>(userEmail ?? "", "get_transcript", cursor ? { meetingIds: [id], cursor } : { meetingIds: [id] })
+      ? await session!.call<RawTranscript>("get_transcript", cursor ? { meetingIds: [id], cursor } : { meetingIds: [id] })
       : await samuFetch<RawTranscript>(PATH_TRANSCRIPT.replace("{id}", id), cursor ? { cursor } : {});
     const t = data.transcripts?.[0] ?? data;
     if (data.text) parts.push(data.text);

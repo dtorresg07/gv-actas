@@ -1,0 +1,194 @@
+import { config, emailVariants, isAllowedEmail } from "../config";
+import type { MeetingSummary, Person, TranscriptLine } from "../types";
+import { mockMeetings, mockTranscript } from "./samu.mock";
+
+/**
+ * Cliente de la API REST de Samu.ai (plan Enterprise).
+ *
+ * Autenticación: encabezado `apiKey` con la clave de la cuenta de GeoVictoria.
+ * Como la clave ve todas las reuniones de la empresa, ESTE servidor filtra por el correo
+ * del usuario que inició sesión: cada persona solo ve reuniones donde participó.
+ *
+ * ⚠️ Rutas: la documentación está en https://api.samu.ai/docs. Las rutas y parámetros por defecto
+ * siguen la forma de los datos de Samu (meetingId, speakers, participantEmails, transcripción en
+ * bloques "[HH:MM:SS] nombre: texto"). Si la API usa otros nombres, se ajustan con SAMU_PATH_* y
+ * SAMU_PARAM_* sin tocar el código.
+ */
+const PATH_MEETINGS = process.env.SAMU_PATH_MEETINGS ?? "/v1/meetings";
+const PATH_TRANSCRIPT = process.env.SAMU_PATH_TRANSCRIPT ?? "/v1/meetings/{id}/transcription";
+const PARAM_EMAIL = process.env.SAMU_PARAM_EMAIL ?? "attendeeEmails";
+const PARAM_FROM = process.env.SAMU_PARAM_FROM ?? "from";
+const PARAM_TO = process.env.SAMU_PARAM_TO ?? "to";
+const PARAM_LIMIT = process.env.SAMU_PARAM_LIMIT ?? "limit";
+const PARAM_OFFSET = process.env.SAMU_PARAM_OFFSET ?? "offset";
+
+const MEETING_ID = /^[a-f0-9]{24}$/;
+
+export class SamuError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+async function samuFetch<T>(path: string, params: Record<string, string | string[]> = {}): Promise<T> {
+  const url = new URL(path, config.samu.baseUrl);
+  for (const [k, v] of Object.entries(params)) {
+    for (const item of Array.isArray(v) ? v : [v]) url.searchParams.append(k, item);
+  }
+  const res = await fetch(url, {
+    headers: { apiKey: config.samu.apiKey, Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new SamuError(res.status, `Samu ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  return res.json() as Promise<T>;
+}
+
+/* ---------- Normalización ---------- */
+
+type RawSpeaker = { name?: string; type?: string; email?: string };
+type RawMeeting = {
+  meetingId?: string; id?: string; _id?: string;
+  name?: string; title?: string;
+  date?: string; startTime?: string;
+  duration?: number; host?: string | { name?: string }; callType?: string | { name?: string };
+  platform?: string; link?: string;
+  participantEmails?: string[]; attendees?: { email?: string; name?: string }[];
+  speakers?: RawSpeaker[];
+};
+
+const COUNTRY: Record<string, string> = {
+  co: "Colombia", cl: "Chile", pe: "Perú", mx: "México", ec: "Ecuador", gt: "Guatemala", ar: "Argentina", cr: "Costa Rica",
+  pa: "Panamá", uy: "Uruguay", bo: "Bolivia", py: "Paraguay", do: "República Dominicana", sv: "El Salvador", hn: "Honduras", es: "España",
+};
+
+const plain = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+function companyFromDomain(domain: string): string {
+  const base = domain.split(".")[0] || domain;
+  return base.length <= 4 ? base.toUpperCase() : base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function platformShort(p?: string): string {
+  const s = (p ?? "").toLowerCase();
+  return s.includes("teams") ? "Teams" : s.includes("meet") ? "Google Meet" : s.includes("zoom") ? "Zoom" : "";
+}
+
+/** Asocia un correo a cada persona cuando el correo contiene un nombre o apellido suyo (y solo uno coincide). */
+function linkEmails(people: Person[], emails: string[]): void {
+  for (const p of people) {
+    if (p.email) continue;
+    const toks = plain(p.name).split(/\s+/).filter((t) => t.length >= 4);
+    const hits = emails.filter((e) => toks.some((t) => plain(e.split("@")[0]).includes(t)));
+    if (hits.length === 1) p.email = hits[0];
+  }
+}
+
+export function normalizeMeeting(m: RawMeeting): MeetingSummary {
+  const emails = [
+    ...(m.participantEmails ?? []),
+    ...(m.attendees ?? []).map((a) => a.email ?? ""),
+  ].map((e) => e.toLowerCase()).filter(Boolean);
+  const external = emails.filter((e) => !isAllowedEmail(e));
+  const domains = [...new Set(external.map((e) => e.split("@")[1]))];
+  const host = typeof m.host === "string" ? m.host : m.host?.name;
+
+  const people: Person[] = (m.speakers ?? [])
+    .map((s) => ({ name: (s.name ?? "").trim(), email: s.email?.toLowerCase(), gv: s.type === "USER" ? true : s.type === "STAKEHOLDER" ? false : null }))
+    .filter((p) => p.name);
+  if (host && !people.some((p) => p.name === host)) people.unshift({ name: host, gv: true });
+  linkEmails(people, emails);
+
+  const tld = domains.map((d) => d.split(".").pop() ?? "").find((t) => COUNTRY[t]);
+  return {
+    id: m.meetingId ?? m.id ?? m._id ?? "",
+    title: (m.name ?? m.title ?? "Reunión sin título").trim(),
+    date: m.date ?? m.startTime ?? new Date(0).toISOString(),
+    durationMin: m.duration ? Math.round(m.duration) : null,
+    host,
+    callType: typeof m.callType === "string" ? m.callType : m.callType?.name,
+    link: m.link ?? (m.meetingId ? `https://dashboard.samu.ai/meetings/${m.meetingId}` : undefined),
+    emails,
+    people,
+    client: domains.map(companyFromDomain).join(" · "),
+    internal: domains.length === 0,
+    country: tld ? COUNTRY[tld] : "",
+    platformShort: platformShort(m.platform),
+  };
+}
+
+/* ---------- Reuniones ---------- */
+
+const PAGE = 10;   // Samu devuelve resúmenes largos: páginas chicas
+const MAX = 60;
+
+/** Reuniones recientes donde participó el usuario (como anfitrión, invitado o asistente). */
+export async function listMeetings(userEmail: string, userName?: string): Promise<MeetingSummary[]> {
+  if (config.samu.mock) return mockMeetings(userEmail, userName);
+  const variants = emailVariants(userEmail);
+  const to = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const from = new Date(Date.now() - config.samu.recentDays * 86_400_000).toISOString().slice(0, 10);
+
+  const found: MeetingSummary[] = [];
+  for (let offset = 0; offset < MAX; offset += PAGE) {
+    const data = await samuFetch<{ meetings?: RawMeeting[]; data?: RawMeeting[]; total?: number }>(PATH_MEETINGS, {
+      [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
+    });
+    const page = (data.meetings ?? data.data ?? []).map(normalizeMeeting).filter((m) => MEETING_ID.test(m.id));
+    for (const m of page) if (!found.some((f) => f.id === m.id)) found.push(m);
+    if (page.length < PAGE || (data.total && offset + PAGE >= data.total)) break;
+  }
+  // Defensa adicional: aunque la API ignore el filtro, el usuario solo ve reuniones donde figura su correo o es anfitrión.
+  return found.filter((m) => m.emails.some((e) => variants.includes(e)) || (userName && m.host === userName));
+}
+
+export async function getMeeting(userEmail: string, id: string, userName?: string): Promise<MeetingSummary> {
+  if (!MEETING_ID.test(id)) throw new SamuError(400, "Id de reunión inválido");
+  const m = (await listMeetings(userEmail, userName)).find((x) => x.id === id);
+  if (!m) throw new SamuError(404, "Reunión no encontrada o sin acceso");
+  return m;
+}
+
+/* ---------- Transcripción ---------- */
+
+const LINE_RE = /^\[(\d{2}:\d{2}:\d{2})\]\s*([^:]{1,80}):\s*(.*)$/;
+const FILLERS = /\b(eh+|em+|mmm+|ehm+)\b[,.]?/gi;
+
+/** Une las líneas consecutivas del mismo hablante (Samu corta las frases cuando hay interrupciones) y quita muletillas. */
+export function parseTranscript(raw: string): TranscriptLine[] {
+  const out: TranscriptLine[] = [];
+  for (const line of raw.split("\n")) {
+    const m = LINE_RE.exec(line.trim());
+    if (!m) { if (out.length && line.trim()) out[out.length - 1].text += " " + line.trim(); continue; }
+    const text = m[3].replace(FILLERS, "").replace(/\s{2,}/g, " ").trim();
+    if (!text) continue;
+    const last = out[out.length - 1];
+    if (last && last.speaker === m[2].trim()) last.text += " " + text;
+    else out.push({ t: m[1], speaker: m[2].trim(), text });
+  }
+  return out;
+}
+
+type RawTranscript = {
+  chunks?: (string | { t?: string; speaker?: string; text?: string })[];
+  transcripts?: { chunks?: string[]; hasMore?: boolean; nextCursor?: string }[];
+  hasMore?: boolean; nextCursor?: string; text?: string;
+};
+
+/** Transcripción completa, recorriendo el cursor hasta que no queden bloques. */
+export async function getTranscript(id: string, userName?: string): Promise<TranscriptLine[]> {
+  if (!MEETING_ID.test(id)) throw new SamuError(400, "Id de reunión inválido");
+  if (config.samu.mock) return parseTranscript(mockTranscript(userName));
+
+  const parts: string[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 100; page++) {
+    const data = await samuFetch<RawTranscript>(PATH_TRANSCRIPT.replace("{id}", id), cursor ? { cursor } : {});
+    const t = data.transcripts?.[0] ?? data;
+    if (data.text) parts.push(data.text);
+    for (const c of t.chunks ?? []) {
+      parts.push(typeof c === "string" ? c : `[${c.t ?? "00:00:00"}] ${c.speaker ?? "Sin nombre"}: ${c.text ?? ""}`);
+    }
+    const next = t.nextCursor ?? data.nextCursor;
+    if (!(t.hasMore ?? data.hasMore) || !next) break;
+    cursor = next;
+  }
+  return parseTranscript(parts.join("\n"));
+}

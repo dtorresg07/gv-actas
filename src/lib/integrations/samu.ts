@@ -1,7 +1,7 @@
 import { config, emailVariants, isAllowedEmail } from "../config";
 import type { MeetingSummary, Person, TranscriptLine } from "../types";
 import { mockMeetings, mockTranscript } from "./samu.mock";
-import { mcpUrl, samuSession } from "../samu/connection";
+import { SamuNotConnected, mcpUrl, readConnection, samuSession } from "../samu/connection";
 import { McpRateLimited } from "../samu/mcp";
 
 /**
@@ -147,6 +147,8 @@ export async function listMeetings(userEmail: string, userName?: string): Promis
   const to = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   const from = new Date(Date.now() - config.samu.recentDays * 86_400_000).toISOString().slice(0, 10);
 
+  // Sin conexión vigente no se usa la memoria (por ejemplo, justo después de desconectar).
+  if (mode === "user" && !readConnection(userEmail)) { cache.delete(userEmail); throw new SamuNotConnected(); }
   const cached = cache.get(userEmail);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.meetings;
 

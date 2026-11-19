@@ -24,7 +24,8 @@ export async function POST(req: Request) {
     const { taskIds, preview } = parsed.data;
     const acta = applyTerms(compact(parsed.data.acta) as Acta);
 
-    await getMeeting(user.email, acta.meetingId, user.name).catch(() => {
+    await getMeeting(user.email, acta.meetingId, user.name).catch((e) => {
+      if (e instanceof Error && e.name === "SamuNotConnected") throw e;
       throw new HttpError(403, "Solo puedes enviar tareas de tus propias reuniones.");
     });
     acta.generadoPor = { nombre: user.name, email: user.email }; // dueño por defecto = usuario autenticado

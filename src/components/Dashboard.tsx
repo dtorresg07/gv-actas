@@ -16,13 +16,32 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [onlyClients, setOnlyClients] = useState(true);
+  const [needsSamu, setNeedsSamu] = useState(false);
+  const [mode, setMode] = useState<string>("");
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Mensaje al volver de Samu (?samu=...)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("samu");
+    if (!q) return;
+    const texts: Record<string, { ok: boolean; text: string }> = {
+      conectado: { ok: true, text: "Listo, tu cuenta de Samu quedó conectada." },
+      cancelado: { ok: false, text: "Cancelaste la conexión con Samu. Puedes intentarlo cuando quieras." },
+      vencido: { ok: false, text: "La conexión tardó demasiado. Vuelve a tocar “Conectar mi Samu”." },
+      "no-configurado": { ok: false, text: "La conexión con Samu aún no está configurada en el servidor. Avisa a quien administra la herramienta." },
+    };
+    setNotice(texts[q] ?? { ok: false, text: "No pudimos conectar tu cuenta de Samu. Intenta de nuevo en un minuto." });
+    window.history.replaceState(null, "", "/");
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/meetings", { cache: "no-store" });
       if (res.status === 401) return void (window.location.href = "/login");
       const data = await res.json();
+      if (res.status === 409 && data.code === "samu_not_connected") { setNeedsSamu(true); setMeetings([]); setError(null); return; }
       if (!res.ok) throw new Error(data.error);
+      setNeedsSamu(false); setMode(data.mode ?? "");
       setMeetings(data.meetings); setDemo(data.demo); setSyncedAt(data.syncedAt); setError(null);
     } catch (e) {
       setError((e as Error).message || "No pudimos conectar con Samu.ai. Reintentamos en un minuto.");
@@ -37,6 +56,27 @@ export function Dashboard() {
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(id); window.removeEventListener("focus", onFocus); };
   }, [load]);
+
+  async function disconnect() {
+    await fetch("/api/samu/disconnect", { method: "POST" }).catch(() => undefined);
+    setNotice({ ok: true, text: "Desconectaste tu cuenta de Samu." });
+    load();
+  }
+
+  if (needsSamu) {
+    return (
+      <>
+        {notice && <div className={`notice ${notice.ok ? "ok" : "err"}`} role="status" style={{ marginBottom: 16 }}>{notice.text}</div>}
+        <div className="card connect-card">
+          <img src="/brand/iso-color.svg" alt="" width={48} height={48} />
+          <h2>Conecta tu cuenta de Samu</h2>
+          <p>Para generar actas necesitamos leer tus reuniones grabadas en Samu.ai. Te llevaremos a Samu para que inicies sesión y autorices el acceso. Solo verás las reuniones que tu cuenta de Samu ya te permite ver.</p>
+          <a className="btn btn-primary btn-lg" href="/api/samu/connect">Conectar mi Samu</a>
+          <p className="muted">Solo lectura: la herramienta no modifica nada en Samu. Puedes desconectarla cuando quieras.</p>
+        </div>
+      </>
+    );
+  }
 
   const q = query.trim().toLowerCase();
   const all = meetings ?? [];
@@ -53,6 +93,7 @@ export function Dashboard() {
           {demo ? <span className="badge demo">Datos de demostración</span> : syncedAt && !error ? <span className="badge live">Sincronizado con Samu.ai</span> : null}
           {syncedAt && <span className="muted">Actualizado {new Date(syncedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>}
           <button className="btn btn-secondary btn-sm" onClick={load}>Actualizar</button>
+          {mode === "user" && <button className="btn btn-secondary btn-sm" onClick={disconnect}>Desconectar Samu</button>}
         </div>
       </div>
 
@@ -64,6 +105,7 @@ export function Dashboard() {
         </div>
       </div>
 
+      {notice && <div className={`notice ${notice.ok ? "ok" : "err"}`} role="status" style={{ marginBottom: 16 }}>{notice.text}</div>}
       {error && <div className="notice err" role="alert" style={{ marginBottom: 16 }}>{error}</div>}
 
       {meetings === null ? (

@@ -1,6 +1,7 @@
 import { config, emailVariants, isAllowedEmail } from "../config";
 import type { MeetingSummary, Person, TranscriptLine } from "../types";
 import { mockMeetings, mockTranscript } from "./samu.mock";
+import { mcpUrl, samuTool } from "../samu/connection";
 
 /**
  * Cliente de la API REST de Samu.ai (plan Enterprise).
@@ -23,6 +24,18 @@ const PARAM_LIMIT = process.env.SAMU_PARAM_LIMIT ?? "limit";
 const PARAM_OFFSET = process.env.SAMU_PARAM_OFFSET ?? "offset";
 
 const MEETING_ID = /^[a-f0-9]{24}$/;
+
+/**
+ * De dónde salen las reuniones:
+ *  - "user": cada persona conecta su propia cuenta de Samu (SAMU_MCP_URL). Recomendado.
+ *  - "company": una clave de API de la empresa (SAMU_API_KEY) y filtro por correo en el servidor.
+ *  - "mock": reuniones de ejemplo (SAMU_MOCK=true o sin configuración).
+ */
+export function samuMode(): "user" | "company" | "mock" {
+  if (process.env.SAMU_MOCK === "true") return "mock";
+  if (mcpUrl()) return "user";
+  return process.env.SAMU_API_KEY ? "company" : "mock";
+}
 
 export class SamuError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -121,21 +134,27 @@ const MAX = 60;
 
 /** Reuniones recientes donde participó el usuario (como anfitrión, invitado o asistente). */
 export async function listMeetings(userEmail: string, userName?: string): Promise<MeetingSummary[]> {
-  if (config.samu.mock) return mockMeetings(userEmail, userName);
+  const mode = samuMode();
+  if (mode === "mock") return mockMeetings(userEmail, userName);
   const variants = emailVariants(userEmail);
   const to = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   const from = new Date(Date.now() - config.samu.recentDays * 86_400_000).toISOString().slice(0, 10);
 
   const found: MeetingSummary[] = [];
   for (let offset = 0; offset < MAX; offset += PAGE) {
-    const data = await samuFetch<{ meetings?: RawMeeting[]; data?: RawMeeting[]; total?: number }>(PATH_MEETINGS, {
-      [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
-    });
+    type Page = { meetings?: RawMeeting[]; data?: RawMeeting[]; total?: number };
+    const data = mode === "user"
+      ? await samuTool<Page>(userEmail, "search_meetings", { attendeeEmails: variants, dateRange: { from, to }, limit: PAGE, offset })
+      : await samuFetch<Page>(PATH_MEETINGS, {
+          [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
+        });
     const page = (data.meetings ?? data.data ?? []).map(normalizeMeeting).filter((m) => MEETING_ID.test(m.id));
     for (const m of page) if (!found.some((f) => f.id === m.id)) found.push(m);
     if (page.length < PAGE || (data.total && offset + PAGE >= data.total)) break;
   }
-  // Defensa adicional: aunque la API ignore el filtro, el usuario solo ve reuniones donde figura su correo o es anfitrión.
+  // Con la cuenta propia, Samu ya limita lo que la persona puede ver.
+  if (mode === "user") return found;
+  // Con la clave de la empresa, defensa adicional: solo reuniones donde figura su correo o es anfitrión.
   return found.filter((m) => m.emails.some((e) => variants.includes(e)) || (userName && m.host === userName));
 }
 
@@ -173,14 +192,17 @@ type RawTranscript = {
 };
 
 /** Transcripción completa, recorriendo el cursor hasta que no queden bloques. */
-export async function getTranscript(id: string, userName?: string): Promise<TranscriptLine[]> {
+export async function getTranscript(id: string, userName?: string, userEmail?: string): Promise<TranscriptLine[]> {
   if (!MEETING_ID.test(id)) throw new SamuError(400, "Id de reunión inválido");
-  if (config.samu.mock) return parseTranscript(mockTranscript(userName));
+  const mode = samuMode();
+  if (mode === "mock") return parseTranscript(mockTranscript(userName));
 
   const parts: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 100; page++) {
-    const data = await samuFetch<RawTranscript>(PATH_TRANSCRIPT.replace("{id}", id), cursor ? { cursor } : {});
+    const data = mode === "user"
+      ? await samuTool<RawTranscript>(userEmail ?? "", "get_transcript", cursor ? { meetingIds: [id], cursor } : { meetingIds: [id] })
+      : await samuFetch<RawTranscript>(PATH_TRANSCRIPT.replace("{id}", id), cursor ? { cursor } : {});
     const t = data.transcripts?.[0] ?? data;
     if (data.text) parts.push(data.text);
     for (const c of t.chunks ?? []) {

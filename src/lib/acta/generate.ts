@@ -6,6 +6,7 @@ import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 import { ACTA_TOOL, ActaDraftSchema } from "./schema";
 import { applyTerms, verifyDraft, type ActaDraft } from "./verify";
 import { demoDraft } from "./demo";
+import { samuMode } from "../integrations/samu";
 
 /** Fecha de la reunión (DD/MM/AAAA) en la zona horaria de la operación. */
 export function meetingDmy(iso: string): string {
@@ -39,7 +40,7 @@ export async function generateActa(m: MeetingSummary, lines: TranscriptLine[], u
 
   let result: { draft: ActaDraft; truncated: boolean };
   if (!config.anthropic.apiKey) {
-    if (!config.samu.mock) throw new HttpError(503, "Falta configurar ANTHROPIC_API_KEY en el servidor.");
+    if (samuMode() !== "mock") throw new HttpError(503, "Falta configurar ANTHROPIC_API_KEY en el servidor.");
     result = { draft: demoDraft(user.name, m.client), truncated: false };
   } else {
     try { result = await callModel(m, lines, dmy); }

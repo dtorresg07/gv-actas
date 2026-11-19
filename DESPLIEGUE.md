@@ -43,7 +43,16 @@ Además del tenant único, la app rechaza cualquier correo que no termine en un 
 ### 1.2 Anthropic
 Crea una clave en console.anthropic.com y ponla en `ANTHROPIC_API_KEY`. El modelo por defecto es `claude-sonnet-5-5`. Cada acta consume aproximadamente lo que ocupa la transcripción (una reunión de 1 hora ≈ 15–25 mil tokens de entrada).
 
-### 1.3 Samu.ai — **revisar antes de publicar**
+### 1.3 Samu.ai — conexión de cada persona (recomendado)
+Cada persona toca **Conectar mi Samu**, inicia sesión en Samu y autoriza. Así cada una ve solo lo que su cuenta de Samu le permite, y no hace falta una clave de la empresa.
+
+1. Consigue la URL del servidor MCP de Samu: es la que usa el conector **SAMU** en claude.ai (Configuración de la organización → Conectores), o pídela a soporte de Samu.
+2. En Vercel agrega `SAMU_MCP_URL` con esa URL, borra `SAMU_MOCK` (o ponlo en `false`) y haz Redeploy.
+3. Si Samu no permite registro automático de aplicaciones, pídeles un client ID y cárgalo en `SAMU_OAUTH_CLIENT_ID` (y `SAMU_OAUTH_CLIENT_SECRET` si lo dan). URL de retorno a registrar: `https://<tu-dominio>/api/samu/callback`.
+
+La conexión de cada persona se guarda cifrada en su navegador; el servidor no guarda nada.
+
+### 1.3b Samu.ai con clave de la empresa (alternativa)
 La API REST de Samu se autentica con el encabezado `apiKey` y viene con el plan Enterprise. Desde aquí no se pudieron confirmar las rutas exactas, así que quedaron configurables:
 
 | Variable | Valor por defecto | Qué es |

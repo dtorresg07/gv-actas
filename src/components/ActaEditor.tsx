@@ -38,6 +38,7 @@ export function ActaEditor({ meetingId, user }: { meetingId: string; user: { nam
       .then(async (r) => {
         if (r.status === 401) { window.location.href = "/login"; return; }
         const data = await r.json();
+        if (r.status === 409 && data.code === "samu_not_connected") { window.location.href = "/"; return; }
         if (!r.ok) throw new Error(data.error ?? "No pudimos generar el acta.");
         if (alive) { setActa(data.acta); setMeeting(data.meeting); }
       })

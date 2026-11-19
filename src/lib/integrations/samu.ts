@@ -145,16 +145,22 @@ export async function listMeetings(userEmail: string, userName?: string): Promis
   const from = new Date(Date.now() - config.samu.recentDays * 86_400_000).toISOString().slice(0, 10);
 
   const found: MeetingSummary[] = [];
-  for (let offset = 0; offset < MAX; offset += PAGE) {
+  // Samu puede devolver menos reuniones que las pedidas cuando los resúmenes son largos ("truncated"):
+  // se avanza según lo que realmente llegó y se sigue hasta cubrir el total.
+  let offset = 0;
+  for (let call = 0; call < 20 && found.length < MAX; call++) {
     type Page = { meetings?: RawMeeting[]; data?: RawMeeting[]; total?: number };
     const data = mode === "user"
       ? await samuTool<Page>(userEmail, "search_meetings", { attendeeEmails: variants, dateRange: { from, to }, limit: PAGE, offset })
       : await samuFetch<Page>(PATH_MEETINGS, {
           [PARAM_EMAIL]: variants, [PARAM_FROM]: from, [PARAM_TO]: to, [PARAM_LIMIT]: String(PAGE), [PARAM_OFFSET]: String(offset),
         });
-    const page = (data.meetings ?? data.data ?? []).map(normalizeMeeting).filter((m) => MEETING_ID.test(m.id));
-    for (const m of page) if (!found.some((f) => f.id === m.id)) found.push(m);
-    if (page.length < PAGE || (data.total && offset + PAGE >= data.total)) break;
+    const raw = data.meetings ?? data.data ?? [];
+    for (const m of raw.map(normalizeMeeting).filter((x) => MEETING_ID.test(x.id))) {
+      if (!found.some((f) => f.id === m.id)) found.push(m);
+    }
+    offset += raw.length;
+    if (raw.length === 0 || (data.total !== undefined && offset >= data.total)) break;
   }
   // Con la cuenta propia, Samu ya limita lo que la persona puede ver.
   if (mode === "user") return found;

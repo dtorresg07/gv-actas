@@ -164,3 +164,12 @@ pre.json { background: var(--card); padding: 10px; border-radius: 8px; font-size
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 .warn-line { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; }
 .warn-line svg { flex: none; margin-top: 2px; }
+
+/* Inicio de sesión con código */
+.fl { font-weight: 700; font-size: 13px; }
+.input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 11px 12px; font: inherit; background: #fff; color: var(--text); }
+.input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.code-input { font-size: 26px; letter-spacing: 10px; text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
+.login .panel .btn { margin-bottom: 0; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 13px; margin: 6px 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }

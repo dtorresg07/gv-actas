@@ -4,6 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getServerSession } from "next-auth";
 import { isAllowedEmail, config } from "./config";
+import { cookieFromHeader, readChallenge, verifyCode } from "./otp";
 
 /**
  * SSO corporativo. Se habilitan los proveedores que tengan credenciales:
@@ -32,6 +33,28 @@ if (process.env.GOOGLE_CLIENT_ID) {
     }),
   );
 }
+
+/**
+ * Código por correo (opción principal): la persona recibe un código de 6 dígitos en su correo
+ * @geovictoria.com y lo escribe. No requiere configurar Microsoft ni Google.
+ */
+providers.push(
+  CredentialsProvider({
+    id: "email-code",
+    name: "Código por correo",
+    credentials: { email: { type: "email" }, code: { type: "text" }, name: { type: "text" } },
+    async authorize(c, req) {
+      const email = (c?.email ?? "").trim().toLowerCase();
+      if (!isAllowedEmail(email)) return null;
+      const headers = (req as { headers?: Record<string, string> } | undefined)?.headers;
+      const challenge = readChallenge(cookieFromHeader(headers?.cookie));
+      const result = verifyCode(challenge, email, c?.code ?? "");
+      if (result !== "ok") throw new Error(result === "expired" ? "CodigoVencido" : result === "locked" ? "DemasiadosIntentos" : "CodigoInvalido");
+      const name = (c?.name ?? "").trim() || email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
+      return { id: email, email, name };
+    },
+  }),
+);
 
 /**
  * Acceso de desarrollo (solo NODE_ENV !== "production" y DEV_LOGIN=true): permite probar la app

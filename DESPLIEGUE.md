@@ -1,6 +1,6 @@
 # Guía de despliegue para TI — Generador de actas GeoVictoria
 
-**Qué es:** una aplicación web (Next.js 14) donde cualquier persona con correo **@geovictoria.com** entra con su cuenta de Microsoft. Ve sus reuniones grabadas en Samu.ai, genera el acta con IA, la descarga en Word o PDF y crea las tareas en Zoho CRM. **No se necesita cuenta de Claude.**
+**Qué es:** una aplicación web (Next.js 14) donde cualquier persona con correo **@geovictoria.com** entra con un código de 6 dígitos que le llega a ese correo (o, si TI lo configura, con su cuenta de Microsoft). Ve sus reuniones grabadas en Samu.ai, genera el acta con IA, la descarga en Word o PDF y crea las tareas en Zoho CRM. **No se necesita cuenta de Claude.**
 
 **Quién ve qué:** la app usa **una sola clave de Samu de la empresa**, pero el servidor filtra por el correo de quien inició sesión. Cada persona solo ve las reuniones donde participó. Las actas no se guardan en el servidor: se generan, se editan en el navegador y se descargan.
 
@@ -16,7 +16,15 @@
 | 4 | **Cliente de Zoho CRM** con refresh token | api-console.zoho.com → Self Client | Admin de Zoho |
 | 5 | Un lugar donde publicarla, con HTTPS | Vercel, Azure App Service o un servidor con Node 20 | TI |
 
-### 1.1 Microsoft Entra ID
+### 1.0 Correo que envía los códigos (lo puede hacer cualquiera, sin TI)
+1. Crea una cuenta de Gmail para la herramienta (ej. `actas.geovictoria@gmail.com`).
+2. En myaccount.google.com → **Seguridad** → activa **Verificación en 2 pasos**.
+3. En myaccount.google.com/apppasswords crea una contraseña de aplicación llamada `Generador de actas`. Google muestra 16 letras.
+4. En Vercel → Settings → Environment Variables agrega `SMTP_USER` (el Gmail) y `SMTP_PASS` (las 16 letras, sin espacios) y haz **Redeploy**.
+
+Cada código vence en 10 minutos, sirve una sola vez y se bloquea tras 5 intentos fallidos.
+
+### 1.1 (Opcional) Microsoft Entra ID
 1. Entra ID → *App registrations* → *New registration*.
 2. Nombre: `Generador de actas`. Tipo de cuenta: **solo este directorio (single tenant)**.
 3. Redirect URI (Web): `https://<tu-dominio>/api/auth/callback/azure-ad`.

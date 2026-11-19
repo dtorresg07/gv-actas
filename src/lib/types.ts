@@ -20,6 +20,9 @@ export type MeetingSummary = {
   internal: boolean;
   country: string;
   platformShort: string;
+  /** Resumen y tareas que Samu ya generó (solo en el servidor; no se envían al navegador). */
+  samuSummary?: string;
+  samuTasks?: { description: string; status?: string; dueAt?: string }[];
 };
 
 export type TranscriptLine = { t: string; speaker: string; text: string };

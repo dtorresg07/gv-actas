@@ -29,10 +29,12 @@ export function verifyDraft(
   lines: TranscriptLine[],
   meetingDmy: string,
   user: { name: string; email: string },
+  opts: { source?: "ia" | "samu" } = {},
 ): Acta {
+  const fromSamu = opts.source === "samu";
   const texts = lines.map((l) => l.text);
   const transcript = texts.join("\n");
-  const hay = normalize(transcript + " " + m.title);
+  const hay = normalize(transcript + " " + m.title + " " + (opts.source === "samu" ? m.samuSummary ?? "" : ""));
   const adv = draft.advertencias.map(String);
   const cliente = (draft.cliente || m.client || "Cliente").trim();
 
@@ -49,7 +51,7 @@ export function verifyDraft(
     if (!hit) { adv.push(`Se quitó a "${a.nombre}" de los asistentes porque no aparece en la reunión.`); return; }
     if ([...placed.cliente, ...placed.gv].some((x) => x.ref === hit)) return;
     let rol = kam(String(a.rol ?? "").trim());
-    if (rol && !wordsMentioned(rol, hay) && !/^KAM\b/.test(rol)) { adv.push(`Se quitó el rol "${rol}" de ${a.nombre} porque no se mencionó en la reunión.`); rol = ""; }
+    if (rol && !fromSamu && !wordsMentioned(rol, hay) && !/^KAM\b/.test(rol)) { adv.push(`Se quitó el rol "${rol}" de ${a.nombre} porque no se mencionó en la reunión.`); rol = ""; }
     const real = hit.gv === true ? "gv" : hit.gv === false ? "cliente" : side;
     placed[real].push({ nombre: a.nombre.trim() || hit.name, rol, ref: hit });
   };
@@ -61,13 +63,13 @@ export function verifyDraft(
   }
 
   const temas: Tema[] = draft.temas.filter((t) => t.texto?.trim()).map((t) => ({
-    texto: kam(t.texto.trim()), evidencia: t.evidencia, verificada: checkEvidence(t.evidencia, texts),
+    texto: kam(t.texto.trim()), evidencia: t.evidencia, verificada: fromSamu || checkEvidence(t.evidencia, texts),
   }));
 
   const asistentes = [...placed.cliente, ...placed.gv];
   const acuerdos: Acuerdo[] = draft.acuerdos.filter((a) => a.compromiso?.trim()).map((a, i) => {
     const warn: string[] = [];
-    if (!checkEvidence(a.evidencia, texts)) warn.push("La cita de respaldo no aparece en la transcripción.");
+    if (!fromSamu && !checkEvidence(a.evidencia, texts)) warn.push("La cita de respaldo no aparece en la transcripción.");
 
     let responsable = kam(String(a.responsable ?? POR_DEFINIR).replace(/^@/, "").trim()) || POR_DEFINIR;
     let responsableEmail: string | undefined;
@@ -82,8 +84,8 @@ export function verifyDraft(
 
     let fecha = String(a.fecha ?? POR_DEFINIR).trim() || POR_DEFINIR;
     if (parseDMY(fecha)) {
-      if (!dateSupported(fecha, a.evidencia, transcript, meetingDmy)) { warn.push(`Se quitó la fecha ${fecha} porque no se mencionó en la reunión.`); fecha = POR_DEFINIR; }
-    } else if (normalize(fecha) !== normalize(POR_DEFINIR) && !wordsMentioned(fecha, hay)) {
+      if (!fromSamu && !dateSupported(fecha, a.evidencia, transcript, meetingDmy)) { warn.push(`Se quitó la fecha ${fecha} porque no se mencionó en la reunión.`); fecha = POR_DEFINIR; }
+    } else if (!fromSamu && normalize(fecha) !== normalize(POR_DEFINIR) && !wordsMentioned(fecha, hay)) {
       warn.push(`Se quitó la fecha "${fecha}" porque no se mencionó en la reunión.`); fecha = POR_DEFINIR;
     }
 

@@ -18,7 +18,8 @@ export async function GET() {
       }
       throw e;
     });
-    return Response.json({ meetings, demo: samuMode() === "mock", mode: samuMode(), syncedAt: new Date().toISOString() });
+    const light = meetings.map(({ samuSummary, samuTasks, ...m }) => ({ ...m, hasSamuSummary: !!samuSummary }));
+    return Response.json({ meetings: light, demo: samuMode() === "mock", mode: samuMode(), syncedAt: new Date().toISOString() });
   } catch (e) {
     if (e instanceof SamuNotConnected) return Response.json({ error: e.message, code: "samu_not_connected" }, { status: 409 });
     return errorResponse(e);

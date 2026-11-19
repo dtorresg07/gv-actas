@@ -65,6 +65,8 @@ type RawMeeting = {
   platform?: string; link?: string;
   participantEmails?: string[]; attendees?: { email?: string; name?: string }[];
   speakers?: RawSpeaker[];
+  summary?: string;
+  tasks?: { description?: string; status?: string; dueAt?: string }[];
 };
 
 const COUNTRY: Record<string, string> = {
@@ -124,6 +126,8 @@ export function normalizeMeeting(m: RawMeeting): MeetingSummary {
     internal: domains.length === 0,
     country: tld ? COUNTRY[tld] : "",
     platformShort: platformShort(m.platform),
+    samuSummary: typeof m.summary === "string" ? m.summary : undefined,
+    samuTasks: (m.tasks ?? []).filter((t) => t.description).map((t) => ({ description: t.description!, status: t.status, dueAt: t.dueAt })),
   };
 }
 

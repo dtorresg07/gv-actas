@@ -56,6 +56,8 @@ export type Acta = {
   asistentesCliente: Asistente[];
   asistentesGV: Asistente[];
   temas: Tema[];
+  /** Acuerdos: lo que se decidió o quedó resuelto en la reunión. */
+  decisiones: Tema[];
   cierre: string;
   acuerdos: Acuerdo[];
   generadoPor: { nombre: string; email: string };

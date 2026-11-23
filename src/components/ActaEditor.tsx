@@ -20,6 +20,7 @@ const clean = (a: Acta): Acta => ({
   asistentesCliente: a.asistentesCliente.filter((p) => p.nombre.trim()),
   asistentesGV: a.asistentesGV.filter((p) => p.nombre.trim()),
   temas: a.temas.filter((t) => t.texto.trim()),
+  decisiones: (a.decisiones ?? []).filter((t) => t.texto.trim()),
   acuerdos: a.acuerdos.filter((t) => t.compromiso.trim()),
 });
 
@@ -95,8 +96,32 @@ function Editor({ initial, meeting, user, onRegenerate }: { initial: Acta; meeti
     [...new Set([...a.asistentesCliente, ...a.asistentesGV].map((p) => p.nombre).filter(Boolean)
       .concat([a.cliente, `${a.cliente} + GeoVictoria`, "GeoVictoria", "Por definir", cur]))].filter(Boolean);
 
-  const unT = a.temas.filter((t) => !t.verificada).length;
+  const unT = [...a.temas, ...(a.decisiones ?? [])].filter((t) => !t.verificada).length;
   const unA = a.acuerdos.filter((t) => !t.verificada).length;
+
+  const bulletList = (key: "temas" | "decisiones", placeholder: string, addLabel: string, warnText: string) => {
+    const list = a[key] ?? [];
+    const update = (i: number, patch: Partial<Acta["temas"][number]>) => set(key, list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+    return (
+      <>
+        <ul className="a-list">
+          {list.map((t, i) => (
+            <li key={i} className={t.verificada ? "" : "unverified"}>
+              <div className="inline nowrap" style={{ alignItems: "flex-start" }}>
+                <textarea className="f" rows={Math.min(4, Math.max(1, Math.ceil(t.texto.length / 90)))} value={t.texto} placeholder={placeholder} onChange={(e) => update(i, { texto: e.target.value })} aria-label={`${key === "temas" ? "Tema" : "Acuerdo"} ${i + 1}`} />
+                <button className="x" title="Quitar" onClick={() => set(key, list.filter((_, j) => j !== i))}><X /></button>
+              </div>
+              {!t.verificada && (
+                <div className="warnline"><Alert /><span>{warnText} <button className="link-btn small" onClick={() => update(i, { verificada: true })}>Lo revisé, es correcto</button></span></div>
+              )}
+              {showEv && t.evidencia && <div className="ev">“{t.evidencia}”</div>}
+            </li>
+          ))}
+        </ul>
+        <button className="link-btn small" onClick={() => set(key, [...list, { texto: "", evidencia: `Agregado a mano por ${user.name}`, verificada: true }])}>{addLabel}</button>
+      </>
+    );
+  };
 
   const people = (key: "asistentesCliente" | "asistentesGV") => (
     <>
@@ -159,25 +184,16 @@ function Editor({ initial, meeting, user, onRegenerate }: { initial: Acta; meeti
             <div className="a-rule" />
 
             <div className="a-lbl">Temas tratados</div>
-            <ul className="a-list">
-              {a.temas.map((t, i) => (
-                <li key={i} className={t.verificada ? "" : "unverified"}>
-                  <div className="inline nowrap">
-                    <input className="f" value={t.texto} onChange={(e) => set("temas", a.temas.map((x, j) => (j === i ? { ...x, texto: e.target.value } : x)))} aria-label={`Tema ${i + 1}`} />
-                    <button className="x" title="Quitar" onClick={() => set("temas", a.temas.filter((_, j) => j !== i))}><X /></button>
-                  </div>
-                  {!t.verificada && (
-                    <div className="warnline"><Alert /><span>No encontramos este tema en la transcripción. <button className="link-btn small" onClick={() => set("temas", a.temas.map((x, j) => (j === i ? { ...x, verificada: true } : x)))}>Lo revisé, es correcto</button></span></div>
-                  )}
-                  {showEv && t.evidencia && <div className="ev">“{t.evidencia}”</div>}
-                </li>
-              ))}
-            </ul>
-            <button className="link-btn small" onClick={() => set("temas", [...a.temas, { texto: "", evidencia: `Agregado a mano por ${user.name}`, verificada: true }])}>+ Agregar tema</button>
+            {bulletList("temas", "Tema: resumen de lo conversado", "+ Agregar tema", "No encontramos este tema en la transcripción.")}
             <textarea className="f" rows={1} value={a.cierre} placeholder="Nota de cierre (opcional)" onChange={(e) => set("cierre", e.target.value)} aria-label="Nota de cierre" />
             <div className="a-rule" />
 
-            <div className="a-lbl">Acuerdos y próximos pasos</div>
+            <div className="a-lbl">Acuerdos</div>
+            {(a.decisiones ?? []).length === 0 && <p className="ev" style={{ margin: "0 0 4px" }}>No se registraron acuerdos. Agrega lo que se decidió en la reunión.</p>}
+            {bulletList("decisiones", "Lo que se decidió o quedó resuelto", "+ Agregar acuerdo", "No encontramos este acuerdo en la transcripción.")}
+            <div className="a-rule" />
+
+            <div className="a-lbl">Compromisos y próximos pasos</div>
             <table className="a-table">
               <thead><tr><th style={{ width: "56%" }}>Compromiso</th><th style={{ width: "26%" }}>Responsable</th><th>Fecha</th></tr></thead>
               <tbody>
@@ -215,7 +231,7 @@ function Editor({ initial, meeting, user, onRegenerate }: { initial: Acta; meeti
                 const n = Math.max(0, ...a.acuerdos.map((t) => Number(t.id.slice(1)) || 0)) + 1;
                 set("acuerdos", [...a.acuerdos, { id: `A${n}`, compromiso: "", responsable: "Por definir", fecha: "Por definir", evidencia: `Agregado a mano por ${user.name}`, verificada: true, advertencias: [] }]);
               }}
-            >+ Agregar acuerdo</button>
+            >+ Agregar compromiso</button>
             <div className="a-foot">GeoVictoria · {a.tipo} · {longDate(a.fecha)}</div>
           </section>
         </div>
@@ -225,7 +241,7 @@ function Editor({ initial, meeting, user, onRegenerate }: { initial: Acta; meeti
             <div className="notice warn">
               <b>Revisa antes de enviar</b>
               <ul>
-                {unT > 0 && <li>{unT} tema(s) sin respaldo.</li>}
+                {unT > 0 && <li>{unT} tema(s) o acuerdo(s) sin respaldo.</li>}
                 {unA > 0 && <li>{unA} acuerdo(s) con observaciones.</li>}
                 {a.advertencias.map((w, i) => <li key={i}>{w}</li>)}
               </ul>

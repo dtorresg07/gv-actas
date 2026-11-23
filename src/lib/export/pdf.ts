@@ -48,19 +48,35 @@ export function actaToPdf(a: Acta): Promise<Buffer> {
   doc.y = y; ensure(40);
   font(true, 8.5, DOC.cyan).text("TEMAS TRATADOS", L, doc.y);
   doc.moveDown(0.3);
-  for (const t of a.temas.length ? a.temas : [{ texto: "—" }]) {
-    ensure(16);
+  const bulletItem = (text: string) => {
+    ensure(18);
     const ty = doc.y;
     font(false).text("•", L + 2, ty);
-    font(false).text(t.texto, L + 14, ty, { width: CW - 14 });
-    doc.y += 1.5;
-  }
+    const i = text.indexOf(": ");
+    if (i > 0 && i <= 60) {
+      font(true, 10, DOC.title).text(text.slice(0, i + 1) + " ", L + 14, ty, { width: CW - 14, continued: true });
+      font(false).text(text.slice(i + 2));
+    } else {
+      font(false).text(text, L + 14, ty, { width: CW - 14 });
+    }
+    doc.y += 3;
+  };
+  for (const t of a.temas.length ? a.temas : [{ texto: "—" }]) bulletItem(t.texto);
   if (a.cierre) font(false).text(a.cierre, L, doc.y, { width: CW });
   y = doc.y + 8; hr(y, DOC.rule); doc.y = y + 28;
 
-  // Acuerdos
+  // Acuerdos (decisiones)
+  if ((a.decisiones ?? []).length) {
+    ensure(40);
+    font(true, 8.5, DOC.cyan).text("ACUERDOS", L, doc.y);
+    doc.moveDown(0.3);
+    for (const t of a.decisiones) bulletItem(t.texto);
+    y = doc.y + 8; hr(y, DOC.rule); doc.y = y + 28;
+  }
+
+  // Compromisos
   ensure(60);
-  font(true, 8.5, DOC.cyan).text("ACUERDOS Y PRÓXIMOS PASOS", L, doc.y);
+  font(true, 8.5, DOC.cyan).text("COMPROMISOS Y PRÓXIMOS PASOS", L, doc.y);
   doc.y += 6;
   const cols = [CW * 0.58, CW * 0.25, CW * 0.17], pad = 8;
   const row = (cells: string[], head: boolean) => {

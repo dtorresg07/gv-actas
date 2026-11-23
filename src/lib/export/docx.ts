@@ -21,6 +21,13 @@ const para = (children: TextRun[], o: { after?: number; align?: (typeof Alignmen
 const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
 const noBorders = { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none };
 const line = (color: string, after = 120) => new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color, space: 1 } }, spacing: { after } });
+/** "Tema: resumen" → título en negrita y resumen normal. */
+function topicRuns(text: string): TextRun[] {
+  const i = text.indexOf(": ");
+  if (i > 0 && i <= 60) return [run(text.slice(0, i + 1), { bold: true, color: DOC.title }), run(" " + text.slice(i + 2))];
+  return [run(text)];
+}
+
 const label = (t: string) => new Paragraph({ children: [run(t.toUpperCase(), { bold: true, color: DOC.cyan, size: 17 })], spacing: { before: 240, after: 80 } });
 
 export async function actaToDocx(a: Acta): Promise<Buffer> {
@@ -91,10 +98,15 @@ export async function actaToDocx(a: Acta): Promise<Buffer> {
         attendees,
         line(DOC.rule, 0),
         label("Temas tratados"),
-        ...(a.temas.length ? a.temas.map((t) => para([run(t.texto)], { bullet: true })) : [para([run("—")])]),
+        ...(a.temas.length ? a.temas.map((t) => para(topicRuns(t.texto), { bullet: true, after: 80 })) : [para([run("—")])]),
         ...(a.cierre ? [para([run(a.cierre)], { after: 80 })] : []),
         line(DOC.rule, 0),
-        label("Acuerdos y próximos pasos"),
+        ...((a.decisiones ?? []).length ? [
+          label("Acuerdos"),
+          ...(a.decisiones ?? []).map((t) => para(topicRuns(t.texto), { bullet: true, after: 80 })),
+          line(DOC.rule, 0),
+        ] : []),
+        label("Compromisos y próximos pasos"),
         new Table({
           width: { size: CONTENT_TWIPS, type: WidthType.DXA }, columnWidths: W, layout: TableLayoutType.FIXED,
           borders: { top: bd, bottom: bd, left: bd, right: bd, insideHorizontal: none, insideVertical: bd }, rows,

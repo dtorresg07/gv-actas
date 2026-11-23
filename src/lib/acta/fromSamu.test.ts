@@ -20,6 +20,10 @@ Capacitar al equipo en la planificación de turnos. Luego se revisó la carga ma
 1. **Planificador Inteligente:** se mostraron las vistas semanal y mensual.
 2. **Carga masiva por Excel:** requiere códigos de turno.
 
+**Avances y compromisos (advancements_and_commitments)**
+
+- Se acordó probar la planificación primero en la sede norte.
+
 **Acciones acordadas (agreed_actions)**
 
 - **Pedro:** configurar los grupos de prueba en la sede norte; validar con el equipo.
@@ -35,7 +39,7 @@ const m: MeetingSummary = {
 };
 
 test("secciones del resumen", () => {
-  assert.deepEqual(splitSections(summary).map((s) => s.key), ["participants_and_roles", "objective", "conversation_content", "agreed_actions"]);
+  assert.deepEqual(splitSections(summary).map((s) => s.key), ["participants_and_roles", "objective", "conversation_content", "advancements_and_commitments", "agreed_actions"]);
 });
 
 test("acta desde el resumen de Samu", () => {
@@ -45,7 +49,8 @@ test("acta desde el resumen de Samu", () => {
   assert.equal(a.objetivo, "Capacitar al equipo en la planificación de turnos");
   assert.deepEqual(a.asistentesGV, [{ nombre: "Lucía Gómez", rol: "Representante de GeoVictoria" }]);
   assert.deepEqual(a.asistentesCliente, [{ nombre: "Pedro Ruiz", rol: "Jefe de operaciones del cliente" }], "Laura no participó");
-  assert.deepEqual(a.temas.map((t) => t.texto), ["Planificador Inteligente", "Carga masiva por Excel"]);
+  assert.deepEqual(a.temas.map((t) => t.texto), ["Planificador Inteligente: se mostraron las vistas semanal y mensual", "Carga masiva por Excel: requiere códigos de turno"]);
+  assert.deepEqual(a.decisiones.map((t) => t.texto), ["Se acordó probar la planificación primero en la sede norte"]);
   assert.deepEqual(a.acuerdos.map((x) => [x.compromiso, x.responsable, x.fecha]), [
     ["Configurar los grupos de prueba en la sede norte", "Pedro", "Por definir"],
     ["Definir quién tendrá permisos para modificar turnos", "Panadería Sol", "Por definir"],
@@ -58,4 +63,21 @@ test("sin secciones: usa las tareas de Samu", () => {
   const a = draftFromSamu({ ...m, title: "Daily", samuSummary: "Conversación breve sobre el viaje de un compañero.", samuTasks: [{ description: "Agendar la próxima reunión", dueAt: "2026-11-20T00:00:00Z" }] });
   assert.equal(a.acuerdos[0].compromiso, "Agendar la próxima reunión");
   assert.equal(a.acuerdos[0].fecha, "20/11/2026");
+});
+
+test("compromisos: una acción por fila, cortos; acuerdos desde el contenido", () => {
+  const s = `**Contenido de la conversación (conversation_content)**
+
+1. **Turnos nocturnos:** se revisó la planilla. Se acordó usar el turno de 22 a 6 en la planta sur.
+
+**Acciones acordadas (agreed_actions)**
+
+- **Lucía:** consultar con Soporte y el equipo de producto las alternativas de carga y preparar una propuesta de modelos para la planta sur y las sucursales del norte que se sumarán el próximo año.`;
+  const a = draftFromSamu({ ...m, samuSummary: s, samuTasks: [] });
+  assert.deepEqual(a.acuerdos.map((x) => x.compromiso), [
+    "Consultar con Soporte y el equipo de producto las alternativas de carga",
+    "Preparar una propuesta de modelos para la planta sur",
+  ]);
+  assert.deepEqual(a.decisiones.map((d) => d.texto), ["Se acordó usar el turno de 22 a 6 en la planta sur"]);
+  assert.equal(a.temas[0].texto, "Turnos nocturnos: se revisó la planilla. Se acordó usar el turno de 22 a 6 en la planta sur");
 });

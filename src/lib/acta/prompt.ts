@@ -24,8 +24,9 @@ Recibirás una transcripción de Samu.ai y los metadatos de la reunión. Tu úni
 - "tipo": uno de ${TIPOS.join(", ")}.
 - "tema": título corto del acta, máximo 6 palabras (ej. "Planificación de turnos").
 - "objetivo": una sola oración de máximo 25 palabras con el propósito de la sesión.
-- "temas": de 3 a 8 puntos, cada uno de máximo 8 palabras, como frase nominal (ej. "Planificador Inteligente: vista semanal y mensual").
-- "acuerdos": cada compromiso empieza con verbo en infinitivo, máximo 10 palabras, una acción por fila.
+- "temas": de 3 a 8 temas realmente conversados, cada uno como "Tema: resumen", con un título corto y lo que se habló o resolvió en una oración de máximo 35 palabras (ej. "Marcaje web: se habilitó para un trabajador sin quitarle la app móvil").
+- "decisiones": de 0 a 6 acuerdos, es decir lo que se decidió, aprobó o quedó resuelto en la reunión (ej. "Se probará la segmentación primero en San Roque"). No repitas aquí las tareas.
+- "acuerdos": los compromisos con dueño; cada uno empieza con verbo en infinitivo, es una sola acción concreta y verificable, máximo 15 palabras. Incluye todos los compromisos asumidos, de GeoVictoria y del cliente.
 </estilo_geovictoria>`;
 
 export function buildUserPrompt(m: MeetingSummary, lines: TranscriptLine[], meetingDmy: string): { text: string; truncated: boolean } {

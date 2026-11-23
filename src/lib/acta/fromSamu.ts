@@ -137,7 +137,9 @@ export function draftFromSamu(m: MeetingSummary): ActaDraft {
 
   // Objetivo
   const objSec = find(secs, ["objective"], ["objetivo"]);
-  const objetivo = clip(firstSentence(objSec?.body ?? (secs.length ? "" : summary)), 360);
+  let objetivo = clip(firstSentence(objSec?.body ?? (secs.length ? "" : summary)), 360);
+  // Objetivo largo con lista ("Alinear…: a, b, c y d") → solo la idea principal.
+  if (objetivo.split(" ").length > 30 && objetivo.indexOf(": ") > 20) objetivo = objetivo.slice(0, objetivo.indexOf(": "));
 
   // Asistentes
   const asisCliente: { nombre: string; rol: string }[] = [];
@@ -152,27 +154,55 @@ export function draftFromSamu(m: MeetingSummary): ActaDraft {
     (isGV ? asisGV : asisCliente).push({ nombre: hit.name, rol: shortRole(it.text) });
   }
 
-  // Temas
+  // Temas tratados: "Tema: resumen breve de lo conversado"
   const contentSec = find(secs, ["conversation_content"], ["contenido"]);
-  let temas = (contentSec ? labeledItems(contentSec.body) : []).map((it) => cap(clip(it.label, 70)));
+  let temas = (contentSec ? labeledItems(contentSec.body) : []).map((it) => {
+    const label = cap(clip(it.label, 60));
+    const resumen = summarizeText(it.text, 200);
+    return resumen ? `${label}: ${resumen}` : label;
+  });
   if (!temas.length) {
-    const alt = find(secs, ["use_cases", "advancements_and_commitments"], ["casos de uso", "avances"]);
-    temas = (alt ? bullets(alt.body) : []).map((b) => cap(clip(firstSentence(b), 70)));
+    const alt = find(secs, ["use_cases"], ["casos de uso"]);
+    temas = (alt ? bullets(alt.body) : []).map((b) => cap(clip(firstSentence(b), 160)));
   }
   if (!temas.length && summary) {
-    temas = summary.replace(/\*\*/g, "").split(/(?<=[.!?])\s+/).filter((s) => s.length > 20).slice(0, 4).map((s) => clip(s, 90));
+    temas = summary.replace(/\*\*/g, "").split(/(?<=[.!?])\s+/).filter((x) => x.length > 20).slice(0, 4).map((x) => clip(x, 180));
   }
 
-  // Acuerdos
+  // Acuerdos (lo que se decidió o quedó resuelto en la reunión)
+  const advSec = find(secs, ["advancements_and_commitments"], ["avances"]);
+  const decisiones = (advSec ? bullets(advSec.body) : [])
+    .map((b) => cap(clip(firstSentence(b.replace(/^[^:]{1,40}:\s*/, "")), 180)))
+    .filter((b) => b.length > 15)
+    .slice(0, 6);
+  // Sin sección de avances: frases del resumen que dicen qué se decidió o quedó resuelto.
+  if (!decisiones.length) {
+    const skip = new Set(["agreed_actions", "next_steps", "participants_and_roles", "objective"]);
+    for (const sec of secs.filter((x) => !skip.has(x.key))) {
+      for (const sentence of sec.body.replace(/\*\*[^*]{1,60}:\*\*/g, "").replace(/\*\*/g, "").replace(/^\s*(?:\d+\.|-)\s*/gm, "").split(/(?<=[.!?])\s+|\n+/)) {
+        const x = sentence.trim();
+        if (x.length > 20 && DECISION.test(x) && !decisiones.some((d) => overlap(d, x) >= 3)) decisiones.push(cap(clip(x, 180)).replace(/[.;:,]\s*$/, ""));
+      }
+    }
+    decisiones.splice(6);
+  }
+
+  // Compromisos (quién hace qué y para cuándo)
   const actSec = find(secs, ["agreed_actions"], ["acciones acordadas"]) ?? find(secs, ["next_steps"], ["proximos pasos"]);
-  let acuerdos = (actSec ? labeledItems(actSec.body) : []).map((it) => {
-    const compromiso = cap(clip(firstSentence(it.text.replace(/\s*Sin fecha acordada\.?|\s*No se fijó fecha[^.]*\.?/gi, "")).split(";")[0], 120));
-    return { compromiso, responsable: normalizeResponsible(it.label, cliente, people), fecha: dueFor(compromiso, m.samuTasks) ?? "Por definir", evidencia: it.text };
-  });
-  if (!acuerdos.length) {
-    acuerdos = (m.samuTasks ?? []).map((t) => ({
-      compromiso: cap(clip(t.description, 120)), responsable: "Por definir", fecha: dmyFromIso(t.dueAt) ?? "Por definir", evidencia: t.description,
-    }));
+  const nextSec = find(secs, ["next_steps"], ["proximos pasos"]);
+  const host = m.host ? m.host.split(" ")[0] : "Por definir";
+  // Una fila por acción: "consultar X y preparar Y" son dos compromisos.
+  const acuerdos = (actSec ? labeledItems(actSec.body) : []).flatMap((it) =>
+    splitCommitment(cleanCommitment(it.text)).map((compromiso) => ({
+      compromiso,
+      responsable: normalizeResponsible(it.label, cliente, people),
+      fecha: dueFor(compromiso, m.samuTasks) ?? dueFor(it.text, m.samuTasks) ?? dateNear(compromiso, nextSec?.body) ?? "Por definir",
+      evidencia: it.text,
+    })));
+  // Tareas que Samu detectó y que no quedaron en las acciones acordadas (son de quien dirigió la reunión).
+  for (const t of m.samuTasks ?? []) {
+    if (acuerdos.some((a) => overlap(a.compromiso, t.description) >= 2 || overlap(a.evidencia, t.description) >= 2)) continue;
+    acuerdos.push({ compromiso: shorten(cleanCommitment(t.description)), responsable: host, fecha: dmyFromIso(t.dueAt) ?? "Por definir", evidencia: t.description });
   }
 
   return {
@@ -183,6 +213,7 @@ export function draftFromSamu(m: MeetingSummary): ActaDraft {
     asistentesCliente: asisCliente,
     asistentesGeoVictoria: asisGV,
     temas: temas.slice(0, 8).map((texto) => ({ texto, evidencia: "Resumen de Samu.ai" })),
+    decisiones: decisiones.map((texto) => ({ texto, evidencia: "Resumen de Samu.ai" })),
     acuerdos,
     advertencias: [
       summary
@@ -190,4 +221,67 @@ export function draftFromSamu(m: MeetingSummary): ActaDraft {
         : "Samu.ai no tiene resumen de esta reunión todavía. Completa el acta a mano o inténtalo más tarde.",
     ],
   };
+}
+
+/** Resumen breve de un párrafo: la primera oración y, si cabe, la que dice qué quedó hecho o resuelto. */
+function summarizeText(text: string, max: number): string {
+  const clean = text.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (!sentences.length) return "";
+  let out = sentences[0];
+  const outcome = sentences.slice(1).find((x) => /se dej[oó]|qued[oó]|se habilit|se acord|se confirm|se defini|se resolvi|se aclar/i.test(x));
+  if (outcome && (out + " " + outcome).length <= max) out += " " + outcome;
+  return clip(out, max).replace(/[.;:,]\s*$/, "");
+}
+
+/** Compromiso claro: una acción completa, sin notas sobre fechas que no se fijaron. */
+function cleanCommitment(text: string): string {
+  const t = text
+    .replace(/\s*(Sin fecha acordada|No se fij[oó] (una )?fecha[^.]*|No se indic[oó] un plazo[^.]*)\.?/gi, "")
+    .replace(/\*\*/g, "");
+  const first = firstSentence(t).split(/;\s+/)[0];
+  return cap(clip(first, 400));
+}
+
+const DECISION = /\b(se acord[oó]|se decidi[oó]|se defini[oó]|se aprob[oó]|se confirm[oó]|se habilit[oó]|se resolvi[oó]|qued[oó] (habilitad|resuelt|configurad|definid|acordad|aprobad)\w*)/i;
+const NOT_VERB = new Set(["lugar", "hogar", "collar", "pilar", "altar", "familiar", "similar", "particular", "regular", "titular", "auxiliar", "militar", "popular", "celular", "modular", "estelar", "mujer", "placer", "poder", "deber", "taller", "porvenir"]);
+
+/** Separa "hacer X y preparar Y" en dos acciones (cuando tras la "y" viene otro verbo en infinitivo). */
+function splitCommitment(text: string): string[] {
+  const parts = text.split(/\s+y\s+(?=([a-záéíóúñ]{4,}(?:ar|er|ir))(?:\s|$))/i).filter((p, i) => i % 2 === 0);
+  const out: string[] = [];
+  for (const p of parts) {
+    const w = /^[a-záéíóúñ]+/i.exec(p)?.[0].toLowerCase() ?? "";
+    if (out.length && (NOT_VERB.has(w) || !/(ar|er|ir)$/.test(w))) out[out.length - 1] += " y " + p;
+    else out.push(p);
+  }
+  return out.map((p) => shorten(cap(p.trim().replace(/[.;:,]\s*$/, ""))));
+}
+
+/** Máximo ~18 palabras: corta en la primera pausa natural después de la octava palabra. */
+function shorten(text: string): string {
+  const words = text.split(/\s+/);
+  if (words.length <= 18) return text;
+  const head = words.slice(0, 8).join(" ").length;
+  const rest = text.slice(head);
+  const m = /,\s|\s(y|para que|ya que|con el fin|incluyendo|además)\s/.exec(rest);
+  if (m && head + m.index <= 150) return text.slice(0, head + m.index).trim();
+  return clip(text, 140);
+}
+
+function overlap(a: string, b: string): number {
+  const words = new Set(normalize(a).split(" ").filter((w) => w.length > 4));
+  return normalize(b).split(" ").filter((w) => words.has(w)).length;
+}
+
+const MES: Record<string, number> = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
+
+/** Fecha explícita ("20 de noviembre") en el próximo paso que se parece al compromiso. */
+function dateNear(compromiso: string, body?: string): string | null {
+  if (!body) return null;
+  const step = bullets(body).find((b) => overlap(compromiso, b) >= 2);
+  const m = step && /(\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?: de (\d{4}))?/i.exec(step);
+  if (!m) return null;
+  const y = m[3] ?? String(new Date().getFullYear());
+  return `${m[1].padStart(2, "0")}/${String(MES[m[2].toLowerCase()]).padStart(2, "0")}/${y}`;
 }

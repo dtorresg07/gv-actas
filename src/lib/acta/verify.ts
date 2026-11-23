@@ -11,6 +11,7 @@ export type ActaDraft = {
   asistentesCliente: { nombre: string; rol?: string | null }[];
   asistentesGeoVictoria: { nombre: string; rol?: string | null }[];
   temas: { texto: string; evidencia: string }[];
+  decisiones?: { texto: string; evidencia: string }[];
   acuerdos: { compromiso: string; responsable: string; fecha?: string | null; evidencia: string }[];
   advertencias: string[];
 };
@@ -106,6 +107,9 @@ export function verifyDraft(
     asistentesCliente: placed.cliente.map(({ nombre, rol }) => ({ nombre, rol })),
     asistentesGV: placed.gv.map(({ nombre, rol }) => ({ nombre, rol })),
     temas,
+    decisiones: (draft.decisiones ?? []).filter((t) => t.texto?.trim()).map((t) => ({
+      texto: kam(t.texto.trim()), evidencia: t.evidencia, verificada: fromSamu || checkEvidence(t.evidencia, texts),
+    })),
     cierre: m.platformShort ? `El detalle completo de lo explicado queda condensado en la grabación de la sesión en ${m.platformShort}.` : "",
     acuerdos,
     generadoPor: { nombre: user.name, email: user.email },
@@ -121,6 +125,7 @@ export function applyTerms(a: Acta): Acta {
     asistentesCliente: a.asistentesCliente.map((p) => ({ ...p, rol: kam(p.rol) })),
     asistentesGV: a.asistentesGV.map((p) => ({ ...p, rol: kam(p.rol) })),
     temas: a.temas.map((t) => ({ ...t, texto: kam(t.texto) })),
+    decisiones: (a.decisiones ?? []).map((t) => ({ ...t, texto: kam(t.texto) })),
     acuerdos: a.acuerdos.map((t) => ({ ...t, compromiso: kam(t.compromiso), responsable: kam(t.responsable), fecha: kam(t.fecha) })),
   };
 }

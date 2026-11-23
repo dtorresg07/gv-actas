@@ -15,7 +15,8 @@ export const ActaSchema = z.object({
   objetivo: str(600),
   asistentesCliente: z.array(z.object({ nombre: str(120), rol: str(120) })).max(60),
   asistentesGV: z.array(z.object({ nombre: str(120), rol: str(120) })).max(60),
-  temas: z.array(z.object({ texto: str(300), evidencia: str(600), verificada: z.boolean() })).max(20),
+  temas: z.array(z.object({ texto: str(400), evidencia: str(600), verificada: z.boolean() })).max(20),
+  decisiones: z.array(z.object({ texto: str(400), evidencia: str(600), verificada: z.boolean() })).max(20).default([]),
   cierre: str(400),
   acuerdos: z.array(z.object({
     id: str(10),
@@ -38,6 +39,7 @@ export function compact<T extends z.infer<typeof ActaSchema>>(a: T): T {
     asistentesCliente: a.asistentesCliente.filter((p) => p.nombre),
     asistentesGV: a.asistentesGV.filter((p) => p.nombre),
     temas: a.temas.filter((t) => t.texto),
+    decisiones: (a.decisiones ?? []).filter((t) => t.texto),
     acuerdos: a.acuerdos.filter((t) => t.compromiso),
   };
 }

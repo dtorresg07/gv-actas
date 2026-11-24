@@ -3,13 +3,28 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { MeetingSummary } from "@/lib/types";
 import { Calendar, Clock } from "./Icons";
+import { connectZoho, useConnections } from "./useConnections";
 
 const POLL_MS = 5 * 60_000;
 
 const fmt = (iso: string) =>
   new Intl.DateTimeFormat("es-CO", { weekday: "short", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
+/** Pines decorativos derivados del isotipo (único acento geométrico permitido por la marca). */
+function Pins() {
+  return (
+    <svg className="pins" viewBox="0 0 180 120" aria-hidden="true">
+      <g fill="none" strokeWidth="2">
+        <circle cx="140" cy="40" r="34" stroke="#ffbb00" opacity=".35"><animate attributeName="r" values="34;38;34" dur="6s" repeatCount="indefinite" /></circle>
+        <circle cx="96" cy="78" r="16" stroke="#00aff2" opacity=".35"><animate attributeName="cy" values="78;72;78" dur="5s" repeatCount="indefinite" /></circle>
+        <circle cx="160" cy="96" r="8" fill="#ffbb00" stroke="none" opacity=".5"><animate attributeName="cy" values="96;90;96" dur="4s" repeatCount="indefinite" /></circle>
+      </g>
+    </svg>
+  );
+}
+
 export function Dashboard() {
+  const conn = useConnections();
   const [meetings, setMeetings] = useState<MeetingSummary[] | null>(null);
   const [demo, setDemo] = useState(false);
   const [syncedAt, setSyncedAt] = useState("");
@@ -66,7 +81,7 @@ export function Dashboard() {
       <>
         {notice && <div className={`notice ${notice.ok ? "ok" : "err"}`} role="status" style={{ marginBottom: 16 }}>{notice.text}</div>}
         <div className="card connect-card">
-          <img src="/brand/iso-color.svg" alt="" width={48} height={48} />
+          <div className="ill"><img src="/brand/iso-white.svg" alt="" /></div>
           <h2>Conecta tu cuenta de Samu</h2>
           <p>Para generar actas necesitamos leer tus reuniones grabadas en Samu.ai. Te llevaremos a Samu para que inicies sesión y autorices el acceso. Solo verás las reuniones que tu cuenta de Samu ya te permite ver.</p>
           <a className="btn btn-primary btn-lg" href="/api/samu/connect">Conectar mi Samu</a>
@@ -82,9 +97,11 @@ export function Dashboard() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="hero">
+        <Pins />
         <div>
-          <h1>Tus reuniones recientes</h1>
+          <div className="eyebrow">Tus reuniones</div>
+          <h1>¿Qué acta preparamos hoy?</h1>
           <p>Elige una reunión y genera su acta en segundos.</p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -94,6 +111,17 @@ export function Dashboard() {
           {mode === "user" && <button className="btn btn-secondary btn-sm" onClick={disconnect}>Desconectar Samu</button>}
         </div>
       </div>
+
+      {conn.zohoMode === "user" && conn.zoho === false && (
+        <div className="setup-strip">
+          <div className="dots">
+            <span className={`dot ${conn.samu ? "on" : ""}`}>Samu.ai {conn.samu ? "conectado" : "sin conectar"}</span>
+            <span className="dot">Zoho sin conectar</span>
+          </div>
+          <span className="muted">Conecta Zoho para crear tus compromisos en CSS Tareas.</span>
+          <button className="btn btn-blue btn-sm" onClick={connectZoho}>Conectar Zoho</button>
+        </div>
+      )}
 
       <div className="filters">
         <input className="search" placeholder="Buscar por cliente, reunión o anfitrión" aria-label="Buscar reuniones" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -125,7 +153,7 @@ function MeetingCard({ m }: { m: MeetingSummary }) {
   const shown = m.people.slice(0, 5);
   const extra = m.people.length - shown.length;
   return (
-    <article className="card">
+    <article className="card meeting">
       <div>
         <div className={`client ${m.internal ? "internal" : ""}`}>{m.internal ? "Reunión interna" : m.client}</div>
         <h3>{m.title}</h3>
@@ -145,7 +173,7 @@ function MeetingCard({ m }: { m: MeetingSummary }) {
         </div>
       </div>
       <div className="actions">
-        <Link href={`/acta/${m.id}`} className="btn btn-primary btn-lg">Generar Acta</Link>
+        <Link href={`/acta/${m.id}`} className="btn btn-blue btn-lg">Generar acta</Link>
       </div>
     </article>
   );

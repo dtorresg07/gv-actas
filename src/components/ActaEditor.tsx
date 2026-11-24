@@ -360,7 +360,7 @@ function CrmCard({ acta }: { acta: Acta }) {
       {zoho?.mode === "user" && !zoho.connected && (
         <div className="notice">
           Para crear tareas con tu usuario, conecta tu cuenta de Zoho una sola vez.
-          <div style={{ marginTop: 8 }}><button className="btn btn-primary btn-sm" onClick={connectZoho}>Conectar mi Zoho</button></div>
+          <div style={{ marginTop: 8 }}><button className="btn btn-blue btn-sm" onClick={connectZoho}>Conectar mi Zoho</button></div>
         </div>
       )}
       {zoho?.mode === "off" && <div className="notice">Zoho aún no está configurado: por ahora el envío es de prueba y no crea nada.</div>}
@@ -376,7 +376,7 @@ function CrmCard({ acta }: { acta: Acta }) {
       ) : (
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-secondary btn-sm" disabled={busy || !ids.length} onClick={() => send(true)}>Ver matriz</button>
-          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={busy || !ids.length || blocked.length > 0 || !!results || (zoho?.mode === "user" && !zoho.connected)} onClick={() => setConfirm(true)}>
+          <button className="btn btn-blue btn-sm" style={{ flex: 1 }} disabled={busy || !ids.length || blocked.length > 0 || !!results || (zoho?.mode === "user" && !zoho.connected)} onClick={() => setConfirm(true)}>
             <Send /> {busy ? "Enviando…" : results ? "Enviadas" : `Crear ${ids.length} en CSS Tareas`}
           </button>
         </div>

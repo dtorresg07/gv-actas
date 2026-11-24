@@ -1,6 +1,7 @@
 import { authOptions, loginMode, accessKeyRequired } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { LoginButtons } from "./LoginButtons";
+import { YoTeAyudo } from "@/components/YoTeAyudo";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +23,25 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
 
   return (
     <main className="login">
-      <div className="panel">
-        <img src="/brand/logo-full-color.svg" alt="GeoVictoria" />
-        <h1>Generador de actas</h1>
-        <p>Convierte tus reuniones de Samu.ai en actas listas para enviar. {loginMode === "code" ? "Te enviaremos un código a tu correo de GeoVictoria para entrar." : "Entra con tu correo de GeoVictoria."}</p>
-        {error && <div className="notice err" role="alert" style={{ marginBottom: 16, textAlign: "left" }}>{error}</div>}
-        <LoginButtons providers={providers} domains={domains} mode={loginMode} keyRequired={accessKeyRequired()} />
-      </div>
+      <section className="login-art" aria-hidden="true">
+        <span className="ring a" /><span className="ring b" />
+        <img className="float" src="/brand/iso-white.svg" alt="" />
+        <img className="logo" src="/brand/logo-full-white.svg" alt="" />
+        <div>
+          <h2>Tus reuniones, en actas claras</h2>
+          <p>Menos tiempo redactando y más tiempo acompañando a tus clientes. Temas, acuerdos y compromisos listos para enviar.</p>
+        </div>
+        <div className="tag"><YoTeAyudo size={20} /></div>
+      </section>
+      <section className="side-form">
+        <div className="panel">
+          <div className="eyebrow">Generador de actas</div>
+          <h1>Entra con tu correo</h1>
+          <p>{loginMode === "code" ? "Te enviaremos un código a tu correo de GeoVictoria para entrar." : "Usa tu correo de GeoVictoria. Así vemos solo tus reuniones."}</p>
+          {error && <div className="notice err" role="alert" style={{ marginBottom: 16, textAlign: "left" }}>{error}</div>}
+          <LoginButtons providers={providers} domains={domains} mode={loginMode} keyRequired={accessKeyRequired()} />
+        </div>
+      </section>
     </main>
   );
 }

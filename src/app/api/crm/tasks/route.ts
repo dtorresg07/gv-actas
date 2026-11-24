@@ -3,7 +3,8 @@ import { requireUser, errorResponse, HttpError } from "@/lib/auth";
 import { ActaSchema, compact } from "@/lib/acta/actaSchema";
 import { applyTerms } from "@/lib/acta/verify";
 import { getMeeting } from "@/lib/integrations/samu";
-import { toCrmTasks, pushTasksToZoho } from "@/lib/integrations/zoho";
+import { toCrmTasks, pushTasksToZoho, teamAuth } from "@/lib/integrations/zoho";
+import { perUserMode, userAuth } from "@/lib/zoho/connection";
 import type { Acta } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,8 +37,9 @@ export async function POST(req: Request) {
 
     const matriz = toCrmTasks(acta, selected);
     if (preview) return Response.json({ matriz });
-    return Response.json({ matriz, resultados: await pushTasksToZoho(matriz, { tipo: acta.tipo, generadoPor: user.name }) });
+    return Response.json({ matriz, resultados: await pushTasksToZoho(matriz, { tipo: acta.tipo, generadoPor: user.name }, perUserMode() ? () => userAuth(user.email) : teamAuth) });
   } catch (e) {
+    if (e instanceof Error && e.name === "ZohoNotConnected") return Response.json({ error: e.message, code: "zoho_not_connected" }, { status: 409 });
     return errorResponse(e);
   }
 }

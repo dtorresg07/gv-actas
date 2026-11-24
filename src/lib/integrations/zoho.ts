@@ -71,18 +71,24 @@ async function accessToken(): Promise<string> {
   return data.access_token;
 }
 
-async function zoho<T>(pathname: string, init: RequestInit = {}): Promise<T | null> {
-  const res = await fetch(`${config.zoho.apiDomain}/crm/${API_VERSION}${pathname}`, {
+/** Acceso a Zoho: el de la persona (su propia cuenta) o el token del equipo. */
+export type ZohoAuth = { token: string; apiDomain: string };
+export async function teamAuth(): Promise<ZohoAuth> {
+  return { token: await accessToken(), apiDomain: config.zoho.apiDomain };
+}
+
+async function zoho<T>(auth: ZohoAuth, pathname: string, init: RequestInit = {}): Promise<T | null> {
+  const res = await fetch(`${auth.apiDomain}/crm/${API_VERSION}${pathname}`, {
     ...init,
-    headers: { Authorization: `Zoho-oauthtoken ${await accessToken()}`, "Content-Type": "application/json", ...init.headers },
+    headers: { Authorization: `Zoho-oauthtoken ${auth.token}`, "Content-Type": "application/json", ...init.headers },
   });
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`Zoho ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
 
-async function findUserId(email: string): Promise<string | undefined> {
-  const data = await zoho<{ users?: { id: string; email: string }[] }>(`/users?type=ActiveUsers&per_page=200`);
+async function findUserId(auth: ZohoAuth, email: string): Promise<string | undefined> {
+  const data = await zoho<{ users?: { id: string; email: string }[] }>(auth, `/users?type=ActiveUsers&per_page=200`);
   const variants = emailVariants(email);
   return data?.users?.find((u) => variants.includes(u.email.toLowerCase()))?.id;
 }
@@ -90,12 +96,12 @@ async function findUserId(email: string): Promise<string | undefined> {
 /** Módulo destino: "CSS Tareas" (API Tareas_Customer_Success). Configurable con ZOHO_TASKS_MODULE. */
 export const TASKS_MODULE = process.env.ZOHO_TASKS_MODULE ?? "Tareas_Customer_Success";
 
-async function findAccountId(name: string): Promise<string | undefined> {
+async function findAccountId(auth: ZohoAuth, name: string): Promise<string | undefined> {
   const clean = name.replace(/[(),\\]/g, " ").trim();
   if (!clean) return undefined;
   for (const op of ["equals", "starts_with"]) {
     const criteria = encodeURIComponent(`(Account_Name:${op}:${clean})`);
-    const data = await zoho<{ data?: { id: string }[] }>(`/Accounts/search?criteria=${criteria}`).catch(() => null);
+    const data = await zoho<{ data?: { id: string }[] }>(auth, `/Accounts/search?criteria=${criteria}`).catch(() => null);
     if (data?.data?.length) return data.data[0].id;
   }
   return undefined;
@@ -103,9 +109,9 @@ async function findAccountId(name: string): Promise<string | undefined> {
 
 /** Valores permitidos de un campo de lista (p. ej. "CSS Responsable"), para no enviar uno que Zoho rechace. */
 let picklistCache: Record<string, string[]> | null = null;
-async function picklist(field: string): Promise<string[]> {
+async function picklist(auth: ZohoAuth, field: string): Promise<string[]> {
   if (!picklistCache) {
-    const data = await zoho<{ fields?: { api_name: string; pick_list_values?: { actual_value: string }[] }[] }>(`/settings/fields?module=${TASKS_MODULE}`).catch(() => null);
+    const data = await zoho<{ fields?: { api_name: string; pick_list_values?: { actual_value: string }[] }[] }>(auth, `/settings/fields?module=${TASKS_MODULE}`).catch(() => null);
     picklistCache = Object.fromEntries((data?.fields ?? []).map((f) => [f.api_name, (f.pick_list_values ?? []).map((v) => v.actual_value)]));
   }
   return picklistCache[field] ?? [];
@@ -113,9 +119,9 @@ async function picklist(field: string): Promise<string[]> {
 
 const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
-async function alreadyCreated(externalId: string): Promise<boolean> {
+async function alreadyCreated(auth: ZohoAuth, externalId: string): Promise<boolean> {
   const word = encodeURIComponent(`GV-ACTA ${externalId}`);
-  const data = await zoho<{ data?: unknown[] }>(`/${TASKS_MODULE}/search?word=${word}`).catch(() => null);
+  const data = await zoho<{ data?: unknown[] }>(auth, `/${TASKS_MODULE}/search?word=${word}`).catch(() => null);
   return (data?.data?.length ?? 0) > 0;
 }
 
@@ -130,14 +136,15 @@ function dueDateTime(day: string): string {
 export type CrmResult = { externalId: string; status: "creada" | "omitida" | "error" | "simulada"; id?: string; detalle?: string };
 
 /** Crea cada compromiso como un registro de "CSS Tareas" (estado Pendiente). */
-export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; generadoPor: string }): Promise<CrmResult[]> {
+export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; generadoPor: string }, getAuth: () => Promise<ZohoAuth> = teamAuth): Promise<CrmResult[]> {
   if (config.zoho.dryRun) {
     return tasks.map((t) => ({ externalId: t.externalId, status: "simulada", detalle: "Zoho no está configurado todavía: no se creó nada en CSS Tareas." }));
   }
+  const auth = await getAuth();
   const userIds = new Map<string, string | undefined>();
-  const accountId = tasks[0] ? await findAccountId(tasks[0].accountName) : undefined;
-  const cssNames = await picklist("CSS_Responsable");
-  const tipos = await picklist("Tipo_de_gesti_n");
+  const accountId = tasks[0] ? await findAccountId(auth, tasks[0].accountName) : undefined;
+  const cssNames = await picklist(auth, "CSS_Responsable");
+  const tipos = await picklist(auth, "Tipo_de_gesti_n");
   const cssResp = cssNames.find((n) => fold(n) === fold(meta.generadoPor));
   const tipo = /capacit/i.test(meta.tipo) && tipos.includes("Capacitación") ? "Capacitación"
     : /diagn/i.test(meta.tipo) && tipos.includes("Diagnóstico") ? "Diagnóstico"
@@ -146,11 +153,11 @@ export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; ge
 
   for (const t of tasks) {
     try {
-      if (await alreadyCreated(t.externalId)) {
+      if (await alreadyCreated(auth, t.externalId)) {
         results.push({ externalId: t.externalId, status: "omitida", detalle: "Ya existía en CSS Tareas." });
         continue;
       }
-      if (!userIds.has(t.ownerEmail)) userIds.set(t.ownerEmail, await findUserId(t.ownerEmail).catch(() => undefined));
+      if (!userIds.has(t.ownerEmail)) userIds.set(t.ownerEmail, await findUserId(auth, t.ownerEmail).catch(() => undefined));
       const ownerId = userIds.get(t.ownerEmail);
       const record: Record<string, unknown> = {
         Name: t.subject.slice(0, 120),
@@ -162,7 +169,7 @@ export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; ge
         ...(ownerId ? { Owner: { id: ownerId } } : {}),
         ...(accountId ? { Nombre_Empresa: { id: accountId } } : {}),
       };
-      const res = await zoho<{ data: { status: string; details?: { id?: string }; message?: string }[] }>(`/${TASKS_MODULE}`, {
+      const res = await zoho<{ data: { status: string; details?: { id?: string }; message?: string }[] }>(auth, `/${TASKS_MODULE}`, {
         method: "POST",
         body: JSON.stringify({ data: [record], trigger: ["workflow"] }),
       });

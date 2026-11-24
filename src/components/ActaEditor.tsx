@@ -307,6 +307,21 @@ function CrmCard({ acta }: { acta: Acta }) {
   const [results, setResults] = useState<CrmResult[] | null>(null);
   const [matriz, setMatriz] = useState<unknown>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [zoho, setZoho] = useState<{ mode: "user" | "team" | "off"; connected: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/zoho/status").then((r) => (r.ok ? r.json() : null)).then((d) => d && setZoho(d)).catch(() => {});
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin === window.location.origin && e.data && e.data.gvZoho === true) setZoho((z) => (z ? { ...z, connected: true } : z));
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  function connectZoho() {
+    const w = window.open("/api/zoho/connect", "gv-zoho", "width=520,height=720");
+    if (!w) window.location.href = "/api/zoho/connect";
+  }
 
   const ids = selected.filter((id) => valid.some((t) => t.id === id));
   const blocked = valid.filter((t) => ids.includes(t.id) && !t.verificada);
@@ -316,6 +331,7 @@ function CrmCard({ acta }: { acta: Acta }) {
     try {
       const res = await fetch("/api/crm/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acta: clean(acta), taskIds: ids, preview }) });
       const data = await res.json();
+      if (res.status === 409 && data.code === "zoho_not_connected") { setZoho((z) => (z ? { ...z, connected: false } : z)); throw new Error(data.error); }
       if (!res.ok) throw new Error(data.error);
       setMatriz(data.matriz);
       if (!preview) setResults(data.resultados);
@@ -341,6 +357,13 @@ function CrmCard({ acta }: { acta: Acta }) {
           </label>
         ))}
       </div>
+      {zoho?.mode === "user" && !zoho.connected && (
+        <div className="notice">
+          Para crear tareas con tu usuario, conecta tu cuenta de Zoho una sola vez.
+          <div style={{ marginTop: 8 }}><button className="btn btn-primary btn-sm" onClick={connectZoho}>Conectar mi Zoho</button></div>
+        </div>
+      )}
+      {zoho?.mode === "off" && <div className="notice">Zoho aún no está configurado: por ahora el envío es de prueba y no crea nada.</div>}
       {blocked.length > 0 && <div className="notice warn">Marca como revisados los acuerdos “por revisar” antes de enviarlos.</div>}
       {confirm ? (
         <div className="notice warn">
@@ -353,7 +376,7 @@ function CrmCard({ acta }: { acta: Acta }) {
       ) : (
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-secondary btn-sm" disabled={busy || !ids.length} onClick={() => send(true)}>Ver matriz</button>
-          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={busy || !ids.length || blocked.length > 0 || !!results} onClick={() => setConfirm(true)}>
+          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={busy || !ids.length || blocked.length > 0 || !!results || (zoho?.mode === "user" && !zoho.connected)} onClick={() => setConfirm(true)}>
             <Send /> {busy ? "Enviando…" : results ? "Enviadas" : `Crear ${ids.length} en CSS Tareas`}
           </button>
         </div>

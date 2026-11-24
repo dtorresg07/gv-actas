@@ -32,7 +32,7 @@ export const config = {
     clientSecret: process.env.ZOHO_CLIENT_SECRET ?? "",
     refreshToken: process.env.ZOHO_REFRESH_TOKEN ?? "",
     /** Días por defecto para el vencimiento cuando la reunión no fijó fecha (no se inventa: se marca en la descripción). */
-    dryRun: process.env.ZOHO_DRY_RUN === "true" || !process.env.ZOHO_REFRESH_TOKEN,
+    dryRun: process.env.ZOHO_DRY_RUN === "true" || !(process.env.ZOHO_REFRESH_TOKEN || (process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET)),
   },
 };
 

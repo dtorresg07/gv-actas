@@ -1,6 +1,7 @@
 import { config, emailVariants, isAllowedEmail } from "../config";
 import type { Acta, Acuerdo } from "../types";
 import { POR_DEFINIR, longDate, parseDMY } from "../acta/validate";
+import { matchName } from "./names";
 
 /**
  * Compromisos del acta → Zoho CRM, módulo "CSS Tareas" (Tareas_Customer_Success).
@@ -117,12 +118,19 @@ async function picklist(auth: ZohoAuth, field: string): Promise<string[]> {
   return picklistCache[field] ?? [];
 }
 
-const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Nombre completo de la cuenta de Zoho con la que se conectó la persona. */
+async function currentUserName(auth: ZohoAuth): Promise<string | undefined> {
+  const data = await zoho<{ users?: { full_name?: string }[] }>(auth, `/users?type=CurrentUser`).catch(() => null);
+  return data?.users?.[0]?.full_name;
+}
 
 async function alreadyCreated(auth: ZohoAuth, externalId: string): Promise<boolean> {
-  const word = encodeURIComponent(`GV-ACTA ${externalId}`);
-  const data = await zoho<{ data?: unknown[] }>(auth, `/${TASKS_MODULE}/search?word=${word}`).catch(() => null);
-  return (data?.data?.length ?? 0) > 0;
+  // La búsqueda por palabra de Zoho es amplia: solo cuenta como duplicado si la referencia exacta está en Comentarios.
+  const ref = `GV-ACTA ${externalId}`;
+  const data = await zoho<{ data?: { Comentarios?: string }[] }>(auth, `/${TASKS_MODULE}/search?word=${encodeURIComponent(externalId)}`).catch(() => null);
+  return (data?.data ?? []).some((r) => (r.Comentarios ?? "").includes(ref));
 }
 
 /** "YYYY-MM-DD" → fecha y hora (9:00) con el desfase de la zona horaria configurada, como espera un campo de fecha y hora. */
@@ -131,6 +139,13 @@ function dueDateTime(day: string): string {
   const tz = new Intl.DateTimeFormat("en-US", { timeZone: config.anthropic.timezone, timeZoneName: "longOffset" }).formatToParts(probe).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
   const off = tz.replace("GMT", "") || "+00:00";
   return `${day}T09:00:00${off}`;
+}
+
+/** Mensaje legible del rechazo de Zoho (incluye el campo con problema). */
+function zohoError(r?: { message?: string; code?: string; details?: Record<string, unknown> }): string {
+  if (!r) return "Respuesta inesperada de Zoho";
+  const field = (r.details as { api_name?: string } | undefined)?.api_name;
+  return [r.message ?? r.code ?? "Error de Zoho", field ? `(campo ${field})` : ""].filter(Boolean).join(" ");
 }
 
 export type CrmResult = { externalId: string; status: "creada" | "omitida" | "error" | "simulada"; id?: string; detalle?: string };
@@ -145,7 +160,11 @@ export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; ge
   const accountId = tasks[0] ? await findAccountId(auth, tasks[0].accountName) : undefined;
   const cssNames = await picklist(auth, "CSS_Responsable");
   const tipos = await picklist(auth, "Tipo_de_gesti_n");
-  const cssResp = cssNames.find((n) => fold(n) === fold(meta.generadoPor));
+  const cssResp = matchName(cssNames, meta.generadoPor) ?? matchName(cssNames, await currentUserName(auth));
+  if (!cssResp && cssNames.length) {
+    const msg = `"CSS Responsable" es obligatorio en CSS Tareas y "${meta.generadoPor}" no está en esa lista de Zoho. Pide que te agreguen o entra a la app con tu nombre tal como aparece en Zoho.`;
+    return tasks.map((t) => ({ externalId: t.externalId, status: "error", detalle: msg }));
+  }
   const tipo = /capacit/i.test(meta.tipo) && tipos.includes("Capacitación") ? "Capacitación"
     : /diagn/i.test(meta.tipo) && tipos.includes("Diagnóstico") ? "Diagnóstico"
     : tipos.includes("Gestión de acompañamiento") ? "Gestión de acompañamiento" : undefined;
@@ -162,14 +181,14 @@ export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; ge
       const record: Record<string, unknown> = {
         Name: t.subject.slice(0, 120),
         Estado_de_Reuni_n: "Pendiente",
-        Comentarios: t.description,
+        Comentarios: t.description.slice(0, 2000),
         ...(tipo ? { Tipo_de_gesti_n: tipo } : {}),
         ...(cssResp ? { CSS_Responsable: cssResp } : {}),
         ...(t.dueDate ? { Fecha_Comprometida: dueDateTime(t.dueDate) } : {}),
         ...(ownerId ? { Owner: { id: ownerId } } : {}),
         ...(accountId ? { Nombre_Empresa: { id: accountId } } : {}),
       };
-      const res = await zoho<{ data: { status: string; details?: { id?: string }; message?: string }[] }>(auth, `/${TASKS_MODULE}`, {
+      const res = await zoho<{ data: { status: string; code?: string; details?: { id?: string; api_name?: string }; message?: string }[] }>(auth, `/${TASKS_MODULE}`, {
         method: "POST",
         body: JSON.stringify({ data: [record], trigger: ["workflow"] }),
       });
@@ -177,9 +196,11 @@ export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; ge
       results.push(
         r?.status === "success"
           ? { externalId: t.externalId, status: "creada", id: r.details?.id, detalle: accountId ? undefined : `No encontré la empresa "${t.accountName}" en Zoho; asígnala a mano.` }
-          : { externalId: t.externalId, status: "error", detalle: r?.message ?? "Respuesta inesperada" },
+          : { externalId: t.externalId, status: "error", detalle: zohoError(r) },
       );
+      if (r?.status !== "success") console.error("CSS Tareas: Zoho rechazó la tarea", t.externalId, JSON.stringify(r));
     } catch (e) {
+      console.error("CSS Tareas: error al crear", t.externalId, (e as Error).message);
       results.push({ externalId: t.externalId, status: "error", detalle: (e as Error).message });
     }
   }

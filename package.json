@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/lib/acta/*.test.ts src/lib/otp.test.ts"
+    "test": "node --test --experimental-strip-types src/lib/acta/*.test.ts src/lib/otp.test.ts src/lib/integrations/zoho.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",

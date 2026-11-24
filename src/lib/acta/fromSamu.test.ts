@@ -78,6 +78,6 @@ test("compromisos: una acción por fila, cortos; acuerdos desde el contenido", (
     "Consultar con Soporte y el equipo de producto las alternativas de carga",
     "Preparar una propuesta de modelos para la planta sur",
   ]);
-  assert.deepEqual(a.decisiones.map((d) => d.texto), ["Se acordó usar el turno de 22 a 6 en la planta sur"]);
+  assert.deepEqual((a.decisiones ?? []).map((d) => d.texto), ["Se acordó usar el turno de 22 a 6 en la planta sur"]);
   assert.equal(a.temas[0].texto, "Turnos nocturnos: se revisó la planilla. Se acordó usar el turno de 22 a 6 en la planta sur");
 });

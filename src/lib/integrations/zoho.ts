@@ -3,13 +3,13 @@ import type { Acta, Acuerdo } from "../types";
 import { POR_DEFINIR, longDate, parseDMY } from "../acta/validate";
 
 /**
- * Matriz de Tareas → Zoho CRM (módulo Tasks).
+ * Compromisos del acta → Zoho CRM, módulo "CSS Tareas" (Tareas_Customer_Success).
  *
  * Reglas de asignación:
  *  - Responsable de GeoVictoria con usuario activo en Zoho → Owner = ese usuario.
  *  - Responsable del cliente o "Por definir" → Owner = quien generó el acta
  *    (es quien hace el seguimiento); el responsable real queda en la descripción.
- *  - Due_Date solo si la reunión fijó una fecha explícita. Nunca se inventa.
+ *  - Fecha Comprometida solo si la reunión fijó una fecha explícita. Nunca se inventa.
  */
 
 const API_VERSION = process.env.ZOHO_API_VERSION ?? "v8";
@@ -87,53 +87,89 @@ async function findUserId(email: string): Promise<string | undefined> {
   return data?.users?.find((u) => variants.includes(u.email.toLowerCase()))?.id;
 }
 
+/** Módulo destino: "CSS Tareas" (API Tareas_Customer_Success). Configurable con ZOHO_TASKS_MODULE. */
+export const TASKS_MODULE = process.env.ZOHO_TASKS_MODULE ?? "Tareas_Customer_Success";
+
 async function findAccountId(name: string): Promise<string | undefined> {
-  const criteria = encodeURIComponent(`(Account_Name:equals:${name.replace(/[(),]/g, " ")})`);
-  const data = await zoho<{ data?: { id: string }[] }>(`/Accounts/search?criteria=${criteria}`);
-  return data?.data?.[0]?.id;
+  const clean = name.replace(/[(),\\]/g, " ").trim();
+  if (!clean) return undefined;
+  for (const op of ["equals", "starts_with"]) {
+    const criteria = encodeURIComponent(`(Account_Name:${op}:${clean})`);
+    const data = await zoho<{ data?: { id: string }[] }>(`/Accounts/search?criteria=${criteria}`).catch(() => null);
+    if (data?.data?.length) return data.data[0].id;
+  }
+  return undefined;
 }
+
+/** Valores permitidos de un campo de lista (p. ej. "CSS Responsable"), para no enviar uno que Zoho rechace. */
+let picklistCache: Record<string, string[]> | null = null;
+async function picklist(field: string): Promise<string[]> {
+  if (!picklistCache) {
+    const data = await zoho<{ fields?: { api_name: string; pick_list_values?: { actual_value: string }[] }[] }>(`/settings/fields?module=${TASKS_MODULE}`).catch(() => null);
+    picklistCache = Object.fromEntries((data?.fields ?? []).map((f) => [f.api_name, (f.pick_list_values ?? []).map((v) => v.actual_value)]));
+  }
+  return picklistCache[field] ?? [];
+}
+
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
 async function alreadyCreated(externalId: string): Promise<boolean> {
   const word = encodeURIComponent(`GV-ACTA ${externalId}`);
-  const data = await zoho<{ data?: unknown[] }>(`/Tasks/search?word=${word}`);
+  const data = await zoho<{ data?: unknown[] }>(`/${TASKS_MODULE}/search?word=${word}`).catch(() => null);
   return (data?.data?.length ?? 0) > 0;
+}
+
+/** "YYYY-MM-DD" → fecha y hora (9:00) con el desfase de la zona horaria configurada, como espera un campo de fecha y hora. */
+function dueDateTime(day: string): string {
+  const probe = new Date(`${day}T14:00:00Z`);
+  const tz = new Intl.DateTimeFormat("en-US", { timeZone: config.anthropic.timezone, timeZoneName: "longOffset" }).formatToParts(probe).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  const off = tz.replace("GMT", "") || "+00:00";
+  return `${day}T09:00:00${off}`;
 }
 
 export type CrmResult = { externalId: string; status: "creada" | "omitida" | "error" | "simulada"; id?: string; detalle?: string };
 
-export async function pushTasksToZoho(tasks: CrmTask[]): Promise<CrmResult[]> {
+/** Crea cada compromiso como un registro de "CSS Tareas" (estado Pendiente). */
+export async function pushTasksToZoho(tasks: CrmTask[], meta: { tipo: string; generadoPor: string }): Promise<CrmResult[]> {
   if (config.zoho.dryRun) {
-    return tasks.map((t) => ({ externalId: t.externalId, status: "simulada", detalle: "ZOHO_DRY_RUN activo: no se envió nada al CRM." }));
+    return tasks.map((t) => ({ externalId: t.externalId, status: "simulada", detalle: "Zoho no está configurado todavía: no se creó nada en CSS Tareas." }));
   }
   const userIds = new Map<string, string | undefined>();
-  const accountId = tasks[0] ? await findAccountId(tasks[0].accountName).catch(() => undefined) : undefined;
+  const accountId = tasks[0] ? await findAccountId(tasks[0].accountName) : undefined;
+  const cssNames = await picklist("CSS_Responsable");
+  const tipos = await picklist("Tipo_de_gesti_n");
+  const cssResp = cssNames.find((n) => fold(n) === fold(meta.generadoPor));
+  const tipo = /capacit/i.test(meta.tipo) && tipos.includes("Capacitación") ? "Capacitación"
+    : /diagn/i.test(meta.tipo) && tipos.includes("Diagnóstico") ? "Diagnóstico"
+    : tipos.includes("Gestión de acompañamiento") ? "Gestión de acompañamiento" : undefined;
   const results: CrmResult[] = [];
 
   for (const t of tasks) {
     try {
       if (await alreadyCreated(t.externalId)) {
-        results.push({ externalId: t.externalId, status: "omitida", detalle: "Ya existía en Zoho." });
+        results.push({ externalId: t.externalId, status: "omitida", detalle: "Ya existía en CSS Tareas." });
         continue;
       }
-      if (!userIds.has(t.ownerEmail)) userIds.set(t.ownerEmail, await findUserId(t.ownerEmail));
+      if (!userIds.has(t.ownerEmail)) userIds.set(t.ownerEmail, await findUserId(t.ownerEmail).catch(() => undefined));
       const ownerId = userIds.get(t.ownerEmail);
       const record: Record<string, unknown> = {
-        Subject: t.subject,
-        Description: t.description,
-        Status: t.status,
-        Priority: "Normal",
-        ...(t.dueDate ? { Due_Date: t.dueDate } : {}),
+        Name: t.subject.slice(0, 120),
+        Estado_de_Reuni_n: "Pendiente",
+        Comentarios: t.description,
+        ...(tipo ? { Tipo_de_gesti_n: tipo } : {}),
+        ...(cssResp ? { CSS_Responsable: cssResp } : {}),
+        ...(t.dueDate ? { Fecha_Comprometida: dueDateTime(t.dueDate) } : {}),
         ...(ownerId ? { Owner: { id: ownerId } } : {}),
-        ...(accountId ? { What_Id: { id: accountId }, $se_module: "Accounts" } : {}),
+        ...(accountId ? { Nombre_Empresa: { id: accountId } } : {}),
       };
-      const res = await zoho<{ data: { status: string; details?: { id?: string }; message?: string }[] }>(`/Tasks`, {
+      const res = await zoho<{ data: { status: string; details?: { id?: string }; message?: string }[] }>(`/${TASKS_MODULE}`, {
         method: "POST",
         body: JSON.stringify({ data: [record], trigger: ["workflow"] }),
       });
       const r = res?.data?.[0];
       results.push(
         r?.status === "success"
-          ? { externalId: t.externalId, status: "creada", id: r.details?.id }
+          ? { externalId: t.externalId, status: "creada", id: r.details?.id, detalle: accountId ? undefined : `No encontré la empresa "${t.accountName}" en Zoho; asígnala a mano.` }
           : { externalId: t.externalId, status: "error", detalle: r?.message ?? "Respuesta inesperada" },
       );
     } catch (e) {

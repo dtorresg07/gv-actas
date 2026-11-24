@@ -327,12 +327,12 @@ function CrmCard({ acta }: { acta: Acta }) {
   }
 
   if (valid.length === 0) return null;
-  const label = (s: string) => (s === "creada" ? "creada en Zoho" : s === "omitida" ? "ya existía" : s === "simulada" ? "simulada (modo prueba)" : "error");
+  const label = (s: string) => (s === "creada" ? "creada en CSS Tareas" : s === "omitida" ? "ya existía" : s === "simulada" ? "simulada (modo prueba)" : "error");
 
   return (
     <div className="card">
-      <h4>Crear tareas en Zoho CRM</h4>
-      <p className="muted" style={{ margin: 0 }}>Los acuerdos de GeoVictoria quedan a nombre de su responsable. Los del cliente quedan a tu nombre para que hagas el seguimiento.</p>
+      <h4>Crear en CSS Tareas</h4>
+      <p className="muted" style={{ margin: 0 }}>Cada compromiso marcado se crea en el módulo CSS Tareas de Zoho CRM como tarea Pendiente, con la empresa y la fecha comprometida. Los del cliente quedan a tu nombre para que hagas el seguimiento.</p>
       <div className="stack">
         {valid.map((t) => (
           <label key={t.id} className="check">
@@ -344,7 +344,7 @@ function CrmCard({ acta }: { acta: Acta }) {
       {blocked.length > 0 && <div className="notice warn">Marca como revisados los acuerdos “por revisar” antes de enviarlos.</div>}
       {confirm ? (
         <div className="notice warn">
-          <b>¿Crear {ids.length} tarea(s) en Zoho CRM?</b>
+          <b>¿Crear {ids.length} tarea(s) en CSS Tareas?</b>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="btn btn-primary btn-sm" onClick={() => send(false)}>Sí, crear</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setConfirm(false)}>Cancelar</button>
@@ -354,14 +354,14 @@ function CrmCard({ acta }: { acta: Acta }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-secondary btn-sm" disabled={busy || !ids.length} onClick={() => send(true)}>Ver matriz</button>
           <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={busy || !ids.length || blocked.length > 0 || !!results} onClick={() => setConfirm(true)}>
-            <Send /> {busy ? "Enviando…" : results ? "Enviadas" : `Enviar ${ids.length} tarea(s)`}
+            <Send /> {busy ? "Enviando…" : results ? "Enviadas" : `Crear ${ids.length} en CSS Tareas`}
           </button>
         </div>
       )}
       {err && <div className="notice err">{err}</div>}
       {results && (
         <div className={`notice ${results.every((r) => r.status !== "error") ? "ok" : "warn"}`}>
-          <ul>{results.map((r) => <li key={r.externalId}>{r.externalId.split(":")[1]}: {label(r.status)}{r.detalle && r.status === "error" ? ` (${r.detalle})` : ""}</li>)}</ul>
+          <ul>{results.map((r) => <li key={r.externalId}>{r.externalId.split(":")[1]}: {label(r.status)}{r.detalle && r.status !== "omitida" ? ` (${r.detalle})` : ""}</li>)}</ul>
         </div>
       )}
       {matriz !== null && (

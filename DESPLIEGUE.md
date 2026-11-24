@@ -72,8 +72,8 @@ curl -H "apiKey: $SAMU_API_KEY" "https://api.samu.ai/v1/meetings?attendeeEmails=
 
 ### 1.4 Zoho CRM
 1. api-console.zoho.com → *Self Client* → genera un código con los scopes
-   `ZohoCRM.modules.tasks.CREATE,ZohoCRM.modules.tasks.READ,ZohoCRM.modules.accounts.READ,ZohoCRM.users.READ`.
-2. Cámbialo por un **refresh token** y llena `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET` y `ZOHO_REFRESH_TOKEN`.
+   `ZohoCRM.modules.ALL,ZohoCRM.users.READ,ZohoCRM.settings.fields.READ`.
+2. Cámbialo por un **refresh token** y llena `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET` y `ZOHO_REFRESH_TOKEN`. El módulo destino es "CSS Tareas" (`ZOHO_TASKS_MODULE=Tareas_Customer_Success`).
 3. Si la cuenta de Zoho no está en el centro de datos de EE. UU., ajusta `ZOHO_ACCOUNTS_URL` y `ZOHO_API_DOMAIN`.
 
 Las tareas se crean con ese usuario técnico. El *Owner* queda en el responsable de GeoVictoria, si existe en Zoho. Cada tarea lleva la referencia `GV-ACTA` para no duplicarse si alguien vuelve a enviarla.

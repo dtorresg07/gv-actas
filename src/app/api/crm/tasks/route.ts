@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
     const matriz = toCrmTasks(acta, selected);
     if (preview) return Response.json({ matriz });
-    return Response.json({ matriz, resultados: await pushTasksToZoho(matriz) });
+    return Response.json({ matriz, resultados: await pushTasksToZoho(matriz, { tipo: acta.tipo, generadoPor: user.name }) });
   } catch (e) {
     return errorResponse(e);
   }

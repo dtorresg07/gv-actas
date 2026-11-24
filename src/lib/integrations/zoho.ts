@@ -14,6 +14,8 @@ import { matchName } from "./names";
  */
 
 const API_VERSION = process.env.ZOHO_API_VERSION ?? "v8";
+/** Organización de Zoho CRM de GeoVictoria ("Victoria S.A.", donde vive CSS Tareas). */
+const ORG_ID = process.env.ZOHO_ORG_ID ?? "685875245";
 
 /** Contrato estable de la matriz (lo que consume cualquier CRM). */
 export type CrmTask = {
@@ -81,7 +83,12 @@ export async function teamAuth(): Promise<ZohoAuth> {
 async function zoho<T>(auth: ZohoAuth, pathname: string, init: RequestInit = {}): Promise<T | null> {
   const res = await fetch(`${auth.apiDomain}/crm/${API_VERSION}${pathname}`, {
     ...init,
-    headers: { Authorization: `Zoho-oauthtoken ${auth.token}`, "Content-Type": "application/json", ...init.headers },
+    headers: {
+      Authorization: `Zoho-oauthtoken ${auth.token}`, "Content-Type": "application/json",
+      // Quien pertenece a varias organizaciones de Zoho escribiría en la suya por defecto: se fija la de GeoVictoria.
+      ...(ORG_ID ? { "X-CRM-ORG": ORG_ID } : {}),
+      ...init.headers,
+    },
   });
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`Zoho ${res.status}: ${await res.text()}`);

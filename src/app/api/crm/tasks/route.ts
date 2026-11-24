@@ -37,8 +37,11 @@ export async function POST(req: Request) {
 
     const matriz = toCrmTasks(acta, selected);
     if (preview) return Response.json({ matriz });
-    return Response.json({ matriz, resultados: await pushTasksToZoho(matriz, { tipo: acta.tipo, generadoPor: user.name }, perUserMode() ? () => userAuth(user.email) : teamAuth) });
+    const resultados = await pushTasksToZoho(matriz, { tipo: acta.tipo, generadoPor: user.name }, perUserMode() ? () => userAuth(user.email) : teamAuth);
+    console.log("CSS Tareas:", user.email, JSON.stringify(resultados.map((r) => ({ id: r.externalId.split(":")[1], status: r.status, detalle: r.detalle }))));
+    return Response.json({ matriz, resultados });
   } catch (e) {
+    console.error("CSS Tareas: fallo general", (e as Error)?.message);
     if (e instanceof Error && e.name === "ZohoNotConnected") return Response.json({ error: e.message, code: "zoho_not_connected" }, { status: 409 });
     return errorResponse(e);
   }
